@@ -8,13 +8,14 @@ repeating_timer_t timer;
 uint slice_num;
 uint channel;
 
-#define OUTPUT_PIN 0 //The PWM DAC output pin
+#define OUTPUT_PIN 0 // The PWM DAC output pin
 
 #define SKIP 4 // number of ADC bits to not use. This should be set to 4 at the moment due to data being stored as bytes.
 #define PWM_PERIOD (4096 >> SKIP)
 #define SAMPLE_RATE_US 23 // about 44.1 kHz
 
-#define BUFFER_SIZE (200 * 1024)
+#define BUFFER_SIZE (200 * 1024) // Max of 200k samples
+
 int8_t loop_buffer[BUFFER_SIZE];
 uint buffer_index = 0;
 uint loop_length = 10 * 1024;
@@ -23,7 +24,8 @@ uint new_loop_length = 10 * 1024;
 /**
  * @brief Convert a BPM value to the number of samples required to loop at that BPM
  */
-uint bpm_to_samples(float bpm) {
+uint bpm_to_samples(float bpm)
+{
     return (60 * 1000000) / (bpm * SAMPLE_RATE_US);
 }
 
@@ -49,7 +51,7 @@ inline uint next(uint i)
 
 /**
  * @brief Callback function for the repeating timer. Runs at the sample rate.
-*/
+ */
 bool timer_callback(repeating_timer_t* rt)
 {
     // 12-bit conversion, assume max value == ADC_VREF == 3.3 V
@@ -96,7 +98,7 @@ int main()
     // Start the sampling timer at about 44.1 kHz
     add_repeating_timer_us(SAMPLE_RATE_US, timer_callback, NULL, &timer);
 
-    //It seems as if something needs to be running in the main loop for the program to work. TODO: confirm this
+    // It seems as if something needs to be running in the main loop for the program to work. TODO: confirm this
     while (1) {
         float bpm;
         scanf("%f", &bpm);
@@ -104,7 +106,8 @@ int main()
         if (new_loop_length > BUFFER_SIZE) {
             printf("Loop length too long, using %u samples\n", BUFFER_SIZE);
             new_loop_length = BUFFER_SIZE;
+        } else {
+            printf("New loop length: %f (%f seconds, %u samples)\n", bpm, 60. / bpm, new_loop_length);
         }
-        printf("New loop length: %f\n", bpm);
     }
 }
