@@ -13,16 +13,24 @@ repeating_timer_t timer;
 uint slice_num;
 uint channel;
 
-#define OUTPUT_PIN 0
+#define OUTPUT_PIN 0 //The PWM DAC output pin
 
-#define SKIP 4 // number of ADC bits to not use
+#define SKIP 4 // number of ADC bits to not use. This should be set to 4 at the moment due to data being stored as bytes.
 #define PWM_PERIOD (4096 >> SKIP)
+#define SAMPLE_RATE_US 23 // about 44.1 kHz
 
 #define BUFFER_SIZE (200 * 1024)
-int8_t buffer[BUFFER_SIZE];
+int8_t loop_buffer[BUFFER_SIZE];
 uint buffer_index = 0;
 uint loop_length = 10 * 1024;
 uint new_loop_length = 10 * 1024;
+
+/**
+ * @brief Convert a BPM value to the number of samples required to loop at that BPM
+ */
+uint bpm_to_samples(float bpm) {
+    return (60 * 1000000) / (bpm * SAMPLE_RATE_US);
+}
 
 /**
  * @brief Return the previous buffer index
@@ -52,12 +60,12 @@ bool timer_callback(repeating_timer_t* rt)
     uint16_t result = adc_read();
     int8_t byte = (result >> SKIP) - 128; // convert to signed 8-bit value
 
-    buffer[buffer_index] = byte; // buffer the value for later
+    loop_buffer[buffer_index] = byte; // buffer the value for later
     buffer_index = next(buffer_index); // increment the buffer index, which will now point to the oldest value stored, giving a digital delay.
 
     // add the current and delayed values together, convert back to unsigned 8-bit value
     // TODO: add clipping to prevent overflow
-    uint8_t delayed = (buffer[buffer_index] >> 1) + (byte >> 1) + 128;
+    uint8_t delayed = (loop_buffer[buffer_index] >> 1) + (byte >> 1) + 128;
 
     pwm_set_chan_level(slice_num, channel, delayed);
 
@@ -88,14 +96,17 @@ int main()
     pwm_set_enabled(slice_num, true);
 
     // Start the sampling timer at about 44.1 kHz
-    add_repeating_timer_us(23, timer_callback, NULL, &timer);
+    add_repeating_timer_us(SAMPLE_RATE_US, timer_callback, NULL, &timer);
 
+    //It seems as if something needs to be running in the main loop for the program to work. TODO: confirm this
     while (1) {
-        scanf("%u", &new_loop_length);
+        float bpm;
+        scanf("%f", &bpm);
+        new_loop_length = bpm_to_samples(bpm);
         if (new_loop_length > BUFFER_SIZE) {
-            printf("Loop length too long, using %u\n", BUFFER_SIZE);
+            printf("Loop length too long, using %u samples\n", BUFFER_SIZE);
             new_loop_length = BUFFER_SIZE;
         }
-        printf("New loop length: %u\n", new_loop_length);
+        printf("New loop length: %f\n", bpm);
     }
 }
