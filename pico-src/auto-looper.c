@@ -1,10 +1,5 @@
 #include "hardware/adc.h"
-#include "hardware/clocks.h"
-#include "hardware/dma.h"
-#include "hardware/i2c.h"
-#include "hardware/pio.h"
 #include "hardware/pwm.h"
-#include "hardware/spi.h"
 #include "hardware/timer.h"
 #include "pico/stdlib.h"
 #include <stdio.h>
@@ -52,6 +47,9 @@ inline uint next(uint i)
     return n;
 }
 
+/**
+ * @brief Callback function for the repeating timer. Runs at the sample rate.
+*/
 bool timer_callback(repeating_timer_t* rt)
 {
     // 12-bit conversion, assume max value == ADC_VREF == 3.3 V
