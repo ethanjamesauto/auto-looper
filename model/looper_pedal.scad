@@ -17,32 +17,32 @@ footswitch_pos = 22;
 
 pedal();
 
+module pedal()
+{
+	difference()
+	{
 
+		// the outside of the pedals
+		cube([ width, length, height ]);
 
-module pedal() {
-difference() {
+		union()
+		{
+			// cut out the inside of the pedal
+			translate([ shell_thickness, shell_thickness, 0 ])
+			cube([ width - shell_thickness * 2, length - shell_thickness * 2, height - shell_thickness ]);
 
-//the outside of the pedal
-cube([width, length, height]);
+			// left and right jacks
+			translate([ 0, jack_pos1, jack_height ])
+			rotate([ 0, 90, 0 ])
+			cylinder(shell_thickness, jack_radius / 2, jack_radius / 2, $fn = cylinder_res);
 
-union() {
-	//cut out the inside of the pedal
-	translate([shell_thickness, shell_thickness, 0])
-		cube([width - shell_thickness * 2, length - shell_thickness * 2, height - shell_thickness]);
-	
-	//left and right jacks
-	translate([0, jack_pos1, jack_height])
-	rotate([0, 90, 0])
-	cylinder(shell_thickness, jack_radius / 2, jack_radius / 2, $fn=cylinder_res);
+			translate([ width - shell_thickness, jack_pos2, jack_height ])
+			rotate([ 0, 90, 0 ])
+			cylinder(shell_thickness, jack_radius / 2, jack_radius / 2, $fn = cylinder_res);
 
-	translate([width - shell_thickness, jack_pos2, jack_height])
-	rotate([0, 90, 0])
-	cylinder(shell_thickness, jack_radius / 2, jack_radius / 2, $fn=cylinder_res);
-	
-	//footswitch
-	translate([width / 2, footswitch_pos, height - shell_thickness])
-	cylinder(shell_thickness, footswitch_radius / 2, footswitch_radius / 2, $fn=cylinder_res);
-
-}
-}
+			// footswitch
+			translate([ width / 2, footswitch_pos, height - shell_thickness ])
+			cylinder(shell_thickness, footswitch_radius / 2, footswitch_radius / 2, $fn = cylinder_res);
+		}
+	}
 }
