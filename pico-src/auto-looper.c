@@ -39,6 +39,7 @@ inline uint prev(uint i)
 
 /**
  * @brief Return the next buffer index
+ * TODO: increasing buffer size plays old samples at the end of the buffer. Fix this.
  */
 inline uint next(uint i)
 {
