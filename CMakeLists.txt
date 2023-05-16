@@ -25,7 +25,7 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(auto-looper auto-looper.c )
+add_executable(auto-looper src/auto-looper.cpp )
 
 pico_set_program_name(auto-looper "auto-looper")
 pico_set_program_version(auto-looper "0.1")
@@ -46,7 +46,6 @@ target_include_directories(auto-looper PRIVATE
 # Add any user requested libraries
 target_link_libraries(auto-looper
         hardware_spi
-        hardware_i2c
         hardware_dma
         hardware_pio
         hardware_timer
@@ -62,4 +61,3 @@ add_custom_command(TARGET auto-looper POST_BUILD
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     COMMENT "Flashing Pico..."
 )
-

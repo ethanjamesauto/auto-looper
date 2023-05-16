@@ -1,8 +1,12 @@
-#include "hardware/adc.h"
-#include "hardware/pwm.h"
-#include "hardware/timer.h"
-#include "pico/stdlib.h"
 #include <stdio.h>
+#include "pico/stdlib.h"
+#include "hardware/spi.h"
+#include "hardware/dma.h"
+#include "hardware/pio.h"
+#include "hardware/timer.h"
+#include "hardware/clocks.h"
+#include "hardware/pwm.h"
+#include "hardware/adc.h"
 
 repeating_timer_t timer;
 uint slice_num;
