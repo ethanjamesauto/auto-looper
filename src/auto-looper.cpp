@@ -107,16 +107,8 @@ int main()
 
     new_loop_length = bpm_to_samples(120);
 
-    //while(getc(stdin) != 101); // wait for the start flag
-    getc(stdin); // wait for the start flag
-
-    while (1) {
-        write_blocking((char*) loop_buffer, 1, sizeof(loop_buffer) - 1);
-        read_blocking((char*) loop_buffer, 1, sizeof(loop_buffer) - 1);
-    }
-
     // It seems as if something needs to be running in the main loop for the program to work. TODO: confirm this
-    /*
+    //*
     while (1) {
         float bpm;
         scanf("%f", &bpm);
