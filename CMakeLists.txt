@@ -25,7 +25,11 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(auto-looper src/auto-looper.cpp )
+add_executable(
+  auto-looper 
+  src/auto-looper.cpp
+  src/stdio_mem.cpp
+)
 
 pico_set_program_name(auto-looper "auto-looper")
 pico_set_program_version(auto-looper "0.1")

@@ -8,6 +8,8 @@
 #include "hardware/pwm.h"
 #include "hardware/adc.h"
 
+#include "stdio_mem.h"
+
 repeating_timer_t timer;
 uint slice_num;
 uint channel;
@@ -103,7 +105,15 @@ int main()
     // Start the sampling timer at about 44.1 kHz
     add_repeating_timer_us(SAMPLE_RATE_US, timer_callback, NULL, &timer);
 
+    new_loop_length = bpm_to_samples(120);
+
+    while(1) {
+        char str[] = "Hello, world!";
+        read_blocking(str, 100, 0);
+    }
+
     // It seems as if something needs to be running in the main loop for the program to work. TODO: confirm this
+    /*
     while (1) {
         float bpm;
         scanf("%f", &bpm);
@@ -114,5 +124,5 @@ int main()
         } else {
             printf("New loop length: %f (%f seconds, %u samples)\n", bpm, 60. / bpm, new_loop_length);
         }
-    }
+    }//*/
 }
