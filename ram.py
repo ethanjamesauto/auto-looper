@@ -10,19 +10,31 @@ header_size = 17
 ram_size = 1 * 1024 * 1024  # 1MB
 ram = np.zeros(ram_size, dtype=np.uint8)
 print('ram size: ', ram_size)
-
+ser = serial.Serial('COM5')
 
 def bytes_to_int(bytes):
     return int.from_bytes(bytes, byteorder='little')
 
+ser.write(101)
 
-ser = serial.Serial('COM5')
 while 1:
     # see if there's any data waiting
     if ser.in_waiting >= header_size:
+        # read the header
         addr = bytes_to_int(ser.read(8))
         data_size = bytes_to_int(ser.read(8))
         rw = bytes_to_int(ser.read(1))
-        if rw > 0:
-            rw = 1
         print('addr: ', addr, '\tdata_size: ', data_size, '\trw: ', rw, sep='')
+
+        if (rw > 0):
+            # write
+            data = ser.read(data_size)
+            ram[addr:addr+data_size] = np.frombuffer(data, dtype=np.uint8)
+            #print('write: ', data)
+        else:
+            # read
+            data = ram[addr:addr+data_size]
+            ser.write(data)
+            #print('read: ', data)
+
+        

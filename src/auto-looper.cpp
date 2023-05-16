@@ -1,12 +1,12 @@
-#include <stdio.h>
-#include "pico/stdlib.h"
-#include "hardware/spi.h"
+#include "hardware/adc.h"
+#include "hardware/clocks.h"
 #include "hardware/dma.h"
 #include "hardware/pio.h"
-#include "hardware/timer.h"
-#include "hardware/clocks.h"
 #include "hardware/pwm.h"
-#include "hardware/adc.h"
+#include "hardware/spi.h"
+#include "hardware/timer.h"
+#include "pico/stdlib.h"
+#include <stdio.h>
 
 #include "stdio_mem.h"
 
@@ -107,9 +107,12 @@ int main()
 
     new_loop_length = bpm_to_samples(120);
 
-    while(1) {
-        char str[] = "Hello, world!";
-        read_blocking(str, 100, 0);
+    //while(getc(stdin) != 101); // wait for the start flag
+    getc(stdin); // wait for the start flag
+
+    while (1) {
+        write_blocking((char*) loop_buffer, 1, sizeof(loop_buffer) - 1);
+        read_blocking((char*) loop_buffer, 1, sizeof(loop_buffer) - 1);
     }
 
     // It seems as if something needs to be running in the main loop for the program to work. TODO: confirm this
