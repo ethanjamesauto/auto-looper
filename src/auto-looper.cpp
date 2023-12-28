@@ -26,11 +26,11 @@ uint channel;
 #define PWM_PERIOD (4096 >> SKIP)
 #define SAMPLE_RATE_US 23 // about 44.1 kHz
 
-#define BUFFER_SIZE (6 * 1024) // Size in 2 SAMPLES (one active, one main). Max of 200k samples (now 100k because we use 2 buffers)
+#define BUFFER_SIZE (4*1024) // Size in 2 SAMPLES (one active, one main). Max of 200k samples (now 100k because we use 2 buffers)
 
 uint8_t ram_buffer[2][BUFFER_SIZE][2];
 uint ram_buffer_start[2];
-uint loop_length = 50*BUFFER_SIZE; // loop length in samples (2ish seconds maybe)
+uint loop_length = 0; // loop length in samples (2ish seconds maybe)
 uint loop_time = 0; // current time in samples
 
 // buffer swapping variables
@@ -48,7 +48,7 @@ enum state_type {
     RECORD_OVER,
     PLAYBACK,
 };
-state_type state = RECORD_OVER; // TODO: change this
+state_type state = FIRST_RECORD; // TODO: change this
 volatile bool signal_write = false;
 volatile uint32_t psram_address;
 
@@ -64,7 +64,6 @@ void write_callback(volatile void* args) {
         next_start = 0; // we need to keep the first block ready for when the user hits the button
     } else {
         next_start = ram_buffer_start[LOOP_BUFFER] + BUFFER_SIZE;
-        //printf("next_start is %d\n", next_start);
     }
 
     // TODO: these calculations might be wrong
@@ -76,7 +75,7 @@ void write_callback(volatile void* args) {
     if (next_start >= loop_length) { // TODO: TEMP STUFF
         // we're done recording
         next_start = 0;
-        printf("Wrapping around because next_start is %d\n", next_start);
+        //printf("Wrapping around because next_start is %d\n", next_start);
     }
     int num_samples_read = BUFFER_SIZE * 2;
 
@@ -126,30 +125,38 @@ bool timer_callback(repeating_timer_t* rt)
 
     loop_time++;    
 
-     //printf("Loop time: %d\n", loop_time);
-        // now, see if we're out of bounds
+    //printf("Loop time: %d\n", loop_time);
+    // now, see if we're out of bounds
+
     if (loop_time >= ram_buffer_start[LOOP_BUFFER] + BUFFER_SIZE) {
         // we're out of bounds, so we need to swap buffers
         //printf("loop buffer location is: %d, and psram buffer location is: %d\n", ram_buffer_start[LOOP_BUFFER], ram_buffer_start[PSRAM_ACCESS_BUFFER]);
         which = !which; // swap buffers. The other buffer must contain the next audio to be played
+
+        // special hack for first reads
+        if (state == FIRST_RECORD) ram_buffer_start[LOOP_BUFFER] = ram_buffer_start[PSRAM_ACCESS_BUFFER] + BUFFER_SIZE;
         
         psram_address = ram_buffer_start[PSRAM_ACCESS_BUFFER] * 2; // TODO: this is the current calculation. might change
         size_t data_size = BUFFER_SIZE * 2;
         signal_write = true;
+        //printf("Now playing sample: %d\n", ram_buffer_start[LOOP_BUFFER]);
     }
 
     if (state == FIRST_RECORD) {
         loop_length++;
-        if (loop_length >= 25 * BUFFER_SIZE) {
+        if (loop_length >= 45 * BUFFER_SIZE) {
             state = RECORD_OVER;
-            printf("Now playing back\n");
-        }
-    } else {
-        if (loop_time >= loop_length) {
-            loop_time = 0;
+            printf("Loop length is %d\n", loop_length);
+            //which = !which;
+            //signal_write = true;
+            //ram_buffer_start[LOOP_BUFFER] = 0;
+            //ram_buffer_start[PSRAM_ACCESS_BUFFER] = BUFFER_SIZE;
         }
     }
 
+    if (loop_time >= loop_length) {
+        loop_time = 0;
+    }
 
     return true; // keep repeating
 }
@@ -175,11 +182,6 @@ int main()
     // Initialize the PSRAM
     ice_sram_init();
     ice_sram_reset();
-
-    for (uint32_t i = 0; i < 2*loop_length; i++) {
-        uint8_t zero = 0;
-        ice_sram_write_blocking(i, &zero, 1);
-    }
 
     // Initialize the ADC
     adc_init();
@@ -211,10 +213,10 @@ int main()
             //for (int i = 0; i < BUFFER_SIZE * 2; i++) {
             //    ((uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER])[i] = i % 100; // TODO: delete this))
             //}
-            printf("Writing to address %d\n", psram_address / 2);
+            //printf("Writing to address %d\n", psram_address / 2);
             ice_sram_write_blocking(psram_address, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], BUFFER_SIZE * 2);// write_callback, NULL);
             write_callback(NULL);
-            printf("Reading from address %d, var which is %d\n", psram_address / 2, which);
+            //printf("Reading from address %d, var which is %d\n", psram_address / 2, which);
             ice_sram_read_blocking(psram_address, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], BUFFER_SIZE * 2);
             signal_write = false;
         }
