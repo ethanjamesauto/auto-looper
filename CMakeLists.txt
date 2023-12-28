@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD 17)
 
 # Initialise pico_sdk from installed location
 # (note this can come from environment, CMake cache etc)
-set(PICO_SDK_PATH "C:/RP2040/pico-sdk")
+set(PICO_SDK_PATH ${CMAKE_CURRENT_SOURCE_DIR}/pico-sdk/)
 
 set(PICO_BOARD pico CACHE STRING "Board type")
 
@@ -23,6 +23,8 @@ project(auto-looper C CXX ASM)
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/pico-ice-sdk)
+
 # Add executable. Default name is the project name, version 0.1
 
 add_executable(
@@ -35,11 +37,13 @@ pico_set_program_name(auto-looper "auto-looper")
 pico_set_program_version(auto-looper "0.1")
 
 pico_enable_stdio_uart(auto-looper 0)
-pico_enable_stdio_usb(auto-looper 1)
+pico_enable_stdio_usb(auto-looper 0)
 
 # Add the standard library to the build
 target_link_libraries(auto-looper
-        pico_stdlib)
+        pico_ice_sdk
+        pico_stdio_usb
+    )
 
 # Add the standard include files to the build
 target_include_directories(auto-looper PRIVATE

@@ -8,13 +8,18 @@
 #include "pico/stdlib.h"
 #include <stdio.h>
 
+#include "boards/pico_ice.h"
+
+// tinyusb
+#include "tusb.h"
+
 #include "stdio_mem.h"
 
 repeating_timer_t timer;
 uint slice_num;
 uint channel;
 
-#define OUTPUT_PIN 0 // The PWM DAC output pin
+#define OUTPUT_PIN 5 // The PWM DAC output pin
 
 #define SKIP 4 // number of ADC bits to not use. This should be set to 4 at the moment due to data being stored as bytes.
 #define PWM_PERIOD (4096 >> SKIP)
@@ -84,6 +89,7 @@ bool timer_callback(repeating_timer_t* rt)
 
 int main()
 {
+    tusb_init();
     stdio_init_all();
     printf("ADC Example, measuring GPIO26\n");
 
@@ -110,6 +116,7 @@ int main()
     // It seems as if something needs to be running in the main loop for the program to work. TODO: confirm this
     //*
     while (1) {
+        tud_task();
         float bpm;
         scanf("%f", &bpm);
         new_loop_length = bpm_to_samples(bpm);
