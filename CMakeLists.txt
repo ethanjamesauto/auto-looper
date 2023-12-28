@@ -64,8 +64,8 @@ target_link_libraries(auto-looper
 
 pico_add_extra_outputs(auto-looper)
 
-add_custom_command(TARGET auto-looper POST_BUILD
-    COMMAND powershell ${CMAKE_CURRENT_SOURCE_DIR}/picoFlashTool_WinPS.ps1
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMENT "Flashing Pico..."
-)
+#add_custom_command(TARGET auto-looper POST_BUILD
+#    COMMAND powershell ${CMAKE_CURRENT_SOURCE_DIR}/picoFlashTool_WinPS.ps1
+#    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+#    COMMENT "Flashing Pico..."
+#)

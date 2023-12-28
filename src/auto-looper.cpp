@@ -9,6 +9,7 @@
 #include <stdio.h>
 
 #include "boards/pico_ice.h"
+#include "ice_sram.h"
 
 // tinyusb
 #include "tusb.h"
@@ -25,40 +26,43 @@ uint channel;
 #define PWM_PERIOD (4096 >> SKIP)
 #define SAMPLE_RATE_US 23 // about 44.1 kHz
 
-#define BUFFER_SIZE (200 * 1024) // Max of 200k samples
+#define BUFFER_SIZE (40 * 1024) // Size in 2 SAMPLES (one active, one main). Max of 200k samples (now 100k because we use 2 buffers)
 
-int8_t loop_buffer[BUFFER_SIZE];
-uint buffer_index = 0;
-uint loop_length = 10 * 1024;
-uint new_loop_length = 10 * 1024;
+uint8_t ram_buffer[2][BUFFER_SIZE][2];
+uint ram_buffer_start[2];
+uint loop_length = 0; // loop length in samples (2ish seconds maybe)
+uint loop_time = 0; // current time in samples
+
+// buffer swapping variables
+bool which = false;
+#define PSRAM_ACCESS_BUFFER (!which)   // the buffer that is read from and then written to by PSRAM
+#define LOOP_BUFFER !which        // the buffer that is used for looping by the CPU
+
+// used for ram_buffer indexing
+#define MAIN_SAMPLE 0
+#define ACTIVE_SAMPLE 1
+
+enum state_type {
+    IDLE,
+    FIRST_RECORD,
+    RECORD_OVER,
+    PLAYBACK,
+};
+state_type state = FIRST_RECORD; // TODO: change this
 
 /**
- * @brief Convert a BPM value to the number of samples required to loop at that BPM
+ * @brief Callback function for the async write to PSRAM.
+ * Called when the write is complete.
+ * @param args Unused
  */
-uint bpm_to_samples(float bpm)
-{
-    return (60 * 1000000) / (bpm * SAMPLE_RATE_US);
-}
-
-/**
- * @brief Return the previous buffer index
- */
-inline uint prev(uint i)
-{
-    return (i + loop_length - 1) % loop_length;
-}
-
-/**
- * @brief Return the next buffer index
- * TODO: increasing buffer size plays old samples at the end of the buffer. Fix this.
- */
-inline uint next(uint i)
-{
-    uint n = (i + 1) % loop_length;
-    if (n == 0) {
-        loop_length = new_loop_length;
+void write_callback(volatile void* args) {
+    // calculate the next block to load. 
+    uint next_start;
+    if (state == FIRST_RECORD) {
+        next_start = 0; // we need to keep the first block ready for when the user hits the button
+    } else {
+        next_start = ram_buffer_start[PSRAM_ACCESS_BUFFER] + BUFFER_SIZE;
     }
-    return n;
 }
 
 /**
@@ -66,26 +70,56 @@ inline uint next(uint i)
  */
 bool timer_callback(repeating_timer_t* rt)
 {
-    // 12-bit conversion, assume max value == ADC_VREF == 3.3 V
-    // const float conversion_factor = 3.3f / (1 << 12);
+    bool do_write;
+    bool do_playback;
+    if (state == FIRST_RECORD) {
+        do_write = true;
+        do_playback = false;
+    } else if (state == RECORD_OVER) {
+        do_write = false;
+        do_playback = true;
+    } else {
+        do_write = false;
+        do_playback = false;
+    }
 
     uint16_t result = adc_read();
-    int8_t byte = (result >> SKIP) - 128; // convert to signed 8-bit value
+    uint8_t current = (result >> SKIP) /*- 128*/; // convert to signed 8-bit value
 
-    loop_buffer[buffer_index] = byte; // buffer the value for later
-    buffer_index = next(buffer_index); // increment the buffer index, which will now point to the oldest value stored, giving a digital delay.
+    uint index = loop_time % BUFFER_SIZE;
 
-    // add the current and delayed values together, convert back to unsigned 8-bit value
-    // TODO: add clipping to prevent overflow
-    uint8_t delayed = (loop_buffer[buffer_index] >> 1) + (byte >> 1) + 128;
+    // add the current and looped values together, then write back
+    uint8_t mixed = ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE] + ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] + current;
+    pwm_set_chan_level(slice_num, channel, mixed);
 
-    pwm_set_chan_level(slice_num, channel, delayed);
+    if (state == IDLE) { 
+        return true; // we're done
+    }
 
-    // printf("Raw value: 0x%03x, voltage: %f V\n", result, result * conversion_factor);
-    // printf("Voltage: %f V\n", result * conversion_factor);
+    if (do_write) {
+        ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE] += ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE];
+        ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = current;
+    }
+
+    if (state == FIRST_RECORD) {
+        loop_length++;
+    }
+
+    loop_time++;
+    
+    // now, see if we're out of bounds
+    if (loop_time >= ram_buffer_start[LOOP_BUFFER] + BUFFER_SIZE) {
+        // we're out of bounds, so we need to swap buffers
+        which = !which; // swap buffers. The other buffer must contain the next audio to be played
+        
+        uint32_t psram_address = ram_buffer_start[PSRAM_ACCESS_BUFFER] * 2; // TODO: this is the current calculation. might change
+        size_t data_size = BUFFER_SIZE * 2;
+        ice_sram_write_async(psram_address, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], data_size, write_callback, NULL);
+    }
 
     return true; // keep repeating
 }
+
 
 int main()
 {
@@ -93,6 +127,19 @@ int main()
     stdio_init_all();
     printf("ADC Example, measuring GPIO26\n");
 
+    //TODO: delete
+    for (int i = 0; i < BUFFER_SIZE; i++) {
+        ram_buffer[0][i][MAIN_SAMPLE] = 0;
+        ram_buffer[1][i][MAIN_SAMPLE] = 0;
+    }
+    ram_buffer_start[0] = 0;
+    ram_buffer_start[1] = 0;
+
+    // Initialize the PSRAM
+    ice_sram_init();
+    ice_sram_reset();
+
+    // Initialize the ADC
     adc_init();
 
     // Make sure GPIO is high-impedance, no pullups etc
@@ -111,20 +158,11 @@ int main()
     // Start the sampling timer at about 44.1 kHz
     add_repeating_timer_us(SAMPLE_RATE_US, timer_callback, NULL, &timer);
 
-    new_loop_length = bpm_to_samples(120);
+    //new_loop_length = bpm_to_samples(120);
 
     // It seems as if something needs to be running in the main loop for the program to work. TODO: confirm this
     //*
     while (1) {
-        tud_task();
-        float bpm;
-        scanf("%f", &bpm);
-        new_loop_length = bpm_to_samples(bpm);
-        if (new_loop_length > BUFFER_SIZE) {
-            printf("Loop length too long, using %u samples\n", BUFFER_SIZE);
-            new_loop_length = BUFFER_SIZE;
-        } else {
-            printf("New loop length: %f (%f seconds, %u samples)\n", bpm, 60. / bpm, new_loop_length);
-        }
+        tud_task(); // tinyusb device task
     }//*/
 }
