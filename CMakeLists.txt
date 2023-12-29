@@ -30,7 +30,6 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/pico-ice-sdk)
 add_executable(
   auto-looper 
   src/auto-looper.cpp
-  src/stdio_mem.cpp
   src/button.cpp
 )
 
