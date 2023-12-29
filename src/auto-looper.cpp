@@ -87,37 +87,28 @@ bool timer_callback(repeating_timer_t* rt)
         ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = 0;
     }
     
-
     loop_time++;    
-
-    //printf("Loop time: %d\n", loop_time);
-    // now, see if we're out of bounds
 
     if (state == FIRST_RECORD) {
         loop_length++;
-        if (loop_length >= 3*BUFFER_SIZE + 10*1024){//5 * BUFFER_SIZE / 2) {
+        if (loop_length >= 3*BUFFER_SIZE + 25*1024){//5 * BUFFER_SIZE / 2) {
             state = RECORD_OVER;
             printf("Loop length is %d\n", loop_length);
             which = !which;
-            printf("Loop buffer start is %d, and PSRAM buffer start is %d\n", ram_buffer_start[LOOP_BUFFER], ram_buffer_start[PSRAM_ACCESS_BUFFER]);
-            printf("Loop buffer offset is %d, and PSRAM buffer offset is %d\n", ram_buffer_offset[LOOP_BUFFER], ram_buffer_offset[PSRAM_ACCESS_BUFFER]);
+            // printf("Loop buffer start is %d, and PSRAM buffer start is %d\n", ram_buffer_start[LOOP_BUFFER], ram_buffer_start[PSRAM_ACCESS_BUFFER]);
+            // printf("Loop buffer offset is %d, and PSRAM buffer offset is %d\n", ram_buffer_offset[LOOP_BUFFER], ram_buffer_offset[PSRAM_ACCESS_BUFFER]);
             signal_write = true;
-            //ram_buffer_start[LOOP_BUFFER] = 0;
-            //ram_buffer_start[PSRAM_ACCESS_BUFFER] = BUFFER_SIZE;
             goto done;
         }
     }
 
     if (ram_buffer_offset[LOOP_BUFFER] >= BUFFER_SIZE) {
         // we're out of bounds, so we need to swap buffers
-        //ram_buffer_offset[LOOP_BUFFER] = 0;
         which = !which; // swap buffers. The other buffer must contain the next audio to be played
 
         // special hack for first reads
         if (state == FIRST_RECORD) ram_buffer_start[LOOP_BUFFER] = ram_buffer_start[PSRAM_ACCESS_BUFFER] + BUFFER_SIZE;
-        
         signal_write = true;
-        //printf("Now playing sample: %d\n", ram_buffer_start[LOOP_BUFFER]);
     }
 
 done:
