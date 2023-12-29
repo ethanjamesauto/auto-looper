@@ -26,7 +26,7 @@ uint channel;
 #define PWM_PERIOD (4096 >> SKIP)
 #define SAMPLE_RATE_US 23 // about 44.1 kHz
 
-#define BUFFER_SIZE (30*1024) // Size in 2 SAMPLES (one active, one main). Max of 200k samples (now 100k because we use 2 buffers)
+#define BUFFER_SIZE (50*1024) // Size in 2 SAMPLES (one active, one main). Max of 200k samples (now 100k because we use 2 buffers)
 
 uint8_t ram_buffer[2][BUFFER_SIZE][2];
 uint ram_buffer_start[2];
@@ -56,7 +56,7 @@ volatile bool signal_write = false;
 /**
  * @brief Callback function for the repeating timer. Runs at the sample rate.
  */
-bool timer_callback(repeating_timer_t* rt)
+bool process_sample(repeating_timer_t* rt)
 {
     bool do_write;
     bool do_playback;
@@ -91,7 +91,7 @@ bool timer_callback(repeating_timer_t* rt)
 
     if (state == FIRST_RECORD) {
         loop_length++;
-        if (loop_length >= 3*BUFFER_SIZE + 25*1024){//5 * BUFFER_SIZE / 2) {
+        if (loop_length >= 44100*30){//5 * BUFFER_SIZE / 2) {
             state = RECORD_OVER;
             printf("Loop length is %d\n", loop_length);
             which = !which;
@@ -108,6 +108,7 @@ bool timer_callback(repeating_timer_t* rt)
 
         // special hack for first reads
         if (state == FIRST_RECORD) ram_buffer_start[LOOP_BUFFER] = ram_buffer_start[PSRAM_ACCESS_BUFFER] + BUFFER_SIZE;
+
         signal_write = true;
     }
 
@@ -117,6 +118,59 @@ done:
     }
 
     return true; // keep repeating
+}
+
+void write_routine() {
+    uint num_write = ram_buffer_offset[PSRAM_ACCESS_BUFFER];
+    uint sample_num = ram_buffer_start[PSRAM_ACCESS_BUFFER];
+    if (sample_num + num_write > loop_length) {
+        uint write_size_one = loop_length - sample_num;
+        uint write_size_two = num_write - write_size_one;
+        uint32_t psram_size_one = write_size_one * 2;
+        uint32_t psram_size_two = write_size_two * 2;
+        uint32_t psram_address_one = sample_num * 2;
+        uint32_t psram_address_two = 0;
+        printf("Writing to address %d, var which is %d, writing %d samples\n", psram_address_one/2, which, write_size_one);
+        ice_sram_write_blocking(psram_address_one, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], psram_size_one);
+        printf("Also writing to address %d, writing %d samples\n", psram_address_two/2, write_size_two);
+        ice_sram_write_blocking(psram_address_two, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER][write_size_one], psram_size_two);
+    } else {
+        uint32_t psram_address = sample_num * 2;
+        printf("Writing to address %d, var which is %d, writing %d samples\n", psram_address/2, which, num_write);
+        ice_sram_write_blocking(psram_address, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], num_write * 2);// write_callback, NULL);
+    }
+
+    ram_buffer_offset[PSRAM_ACCESS_BUFFER] = 0;
+        
+    // calculate the next block to load. 
+    uint next_start;
+    if (state == FIRST_RECORD) {
+        next_start = 0; // we need to keep the first block ready for when the user hits the button
+    } else {
+        next_start = (ram_buffer_start[LOOP_BUFFER] + BUFFER_SIZE) % loop_length;
+    }
+
+    int num_samples_read = BUFFER_SIZE * 2;
+    uint next_size = num_samples_read * 2;
+    ram_buffer_start[PSRAM_ACCESS_BUFFER] = next_start;
+    sample_num = next_start;
+    if (sample_num + BUFFER_SIZE > loop_length) {
+        uint read_size_one = loop_length - sample_num;
+        uint read_size_two = BUFFER_SIZE - read_size_one;
+        uint32_t psram_size_one = read_size_one * 2;
+        uint32_t psram_size_two = read_size_two * 2;
+        uint32_t psram_address_one = sample_num * 2;
+        uint32_t psram_address_two = 0;
+        printf("Reading from address %d, var which is %d\n", psram_address_one/2, which);
+        ice_sram_read_blocking(psram_address_one, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], psram_size_one);
+        printf("Also reading from address %d, reading %d samples\n", psram_address_two/2, read_size_two);
+        ice_sram_read_blocking(psram_address_two, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER][read_size_one], psram_size_two);
+    } else {
+        uint32_t psram_address = sample_num * 2;
+        printf("Reading from address %d, var which is %d\n", psram_address/2, which);
+        ice_sram_read_blocking(psram_address, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], BUFFER_SIZE * 2);// read_callback, NULL);
+    }
+    signal_write = false;
 }
 
 
@@ -159,7 +213,7 @@ int main()
     pwm_set_enabled(slice_num, true);
 
     // Start the sampling timer at about 44.1 kHz
-    add_repeating_timer_us(SAMPLE_RATE_US, timer_callback, NULL, &timer);
+    add_repeating_timer_us(SAMPLE_RATE_US, process_sample, NULL, &timer);
 
     //new_loop_length = bpm_to_samples(120);
 
@@ -168,56 +222,7 @@ int main()
     while (1) {
         tud_task(); // tinyusb device task
         if (signal_write) {
-            uint num_write = ram_buffer_offset[PSRAM_ACCESS_BUFFER];
-            uint sample_num = ram_buffer_start[PSRAM_ACCESS_BUFFER];
-            if (sample_num + num_write > loop_length) {
-                uint write_size_one = loop_length - sample_num;
-                uint write_size_two = num_write - write_size_one;
-                uint32_t psram_size_one = write_size_one * 2;
-                uint32_t psram_size_two = write_size_two * 2;
-                uint32_t psram_address_one = sample_num * 2;
-                uint32_t psram_address_two = 0;
-                printf("Writing to address %d, var which is %d, writing %d samples\n", psram_address_one/2, which, write_size_one);
-                ice_sram_write_blocking(psram_address_one, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], psram_size_one);
-                printf("Also writing to address %d, writing %d samples\n", psram_address_two/2, write_size_two);
-                ice_sram_write_blocking(psram_address_two, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER][write_size_one], psram_size_two);
-            } else {
-                uint32_t psram_address = sample_num * 2;
-                printf("Writing to address %d, var which is %d, writing %d samples\n", psram_address/2, which, num_write);
-                ice_sram_write_blocking(psram_address, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], num_write * 2);// write_callback, NULL);
-            }
-
-            ram_buffer_offset[PSRAM_ACCESS_BUFFER] = 0;
-                
-            // calculate the next block to load. 
-            uint next_start;
-            if (state == FIRST_RECORD) {
-                next_start = 0; // we need to keep the first block ready for when the user hits the button
-            } else {
-                next_start = (ram_buffer_start[LOOP_BUFFER] + BUFFER_SIZE) % loop_length;
-            }
-
-            int num_samples_read = BUFFER_SIZE * 2;
-            uint next_size = num_samples_read * 2;
-            ram_buffer_start[PSRAM_ACCESS_BUFFER] = next_start;
-            sample_num = next_start;
-            if (sample_num + BUFFER_SIZE > loop_length) {
-                uint read_size_one = loop_length - sample_num;
-                uint read_size_two = BUFFER_SIZE - read_size_one;
-                uint32_t psram_size_one = read_size_one * 2;
-                uint32_t psram_size_two = read_size_two * 2;
-                uint32_t psram_address_one = sample_num * 2;
-                uint32_t psram_address_two = 0;
-                printf("Reading from address %d, var which is %d\n", psram_address_one/2, which);
-                ice_sram_read_blocking(psram_address_one, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], psram_size_one);
-                printf("Also reading from address %d, reading %d samples\n", psram_address_two/2, read_size_two);
-                ice_sram_read_blocking(psram_address_two, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER][read_size_one], psram_size_two);
-            } else {
-                uint32_t psram_address = sample_num * 2;
-                printf("Reading from address %d, var which is %d\n", psram_address/2, which);
-                ice_sram_read_blocking(psram_address, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], BUFFER_SIZE * 2);// read_callback, NULL);
-            }
-            signal_write = false;
+            write_routine();
         }
     }//*/
 }
