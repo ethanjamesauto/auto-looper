@@ -52,7 +52,7 @@ enum state_type {
 
 state_type state = FIRST_RECORD; // TODO: change this
 volatile bool signal_write = false;
-volatile uint32_t psram_address;
+volatile uint32_t sample_num;
 
 /**
  * @brief Callback function for the repeating timer. Runs at the sample rate.
@@ -65,7 +65,7 @@ bool timer_callback(repeating_timer_t* rt)
     uint16_t result = adc_read();
     uint8_t current = (result >> SKIP) /*- 128*/; // convert to signed 8-bit value
 
-    uint index = loop_time % BUFFER_SIZE;
+    uint index = ram_buffer_offset[LOOP_BUFFER]++;
 
     // add the current and looped values together, then write back
     uint8_t mixed;
@@ -94,23 +94,9 @@ bool timer_callback(repeating_timer_t* rt)
     //printf("Loop time: %d\n", loop_time);
     // now, see if we're out of bounds
 
-    if (loop_time >= ram_buffer_start[LOOP_BUFFER] + BUFFER_SIZE) {
-        // we're out of bounds, so we need to swap buffers
-        //printf("loop buffer location is: %d, and psram buffer location is: %d\n", ram_buffer_start[LOOP_BUFFER], ram_buffer_start[PSRAM_ACCESS_BUFFER]);
-        which = !which; // swap buffers. The other buffer must contain the next audio to be played
-
-        // special hack for first reads
-        if (state == FIRST_RECORD) ram_buffer_start[LOOP_BUFFER] = ram_buffer_start[PSRAM_ACCESS_BUFFER] + BUFFER_SIZE;
-        
-        psram_address = ram_buffer_start[PSRAM_ACCESS_BUFFER] * 2; // TODO: this is the current calculation. might change
-        size_t data_size = BUFFER_SIZE * 2;
-        signal_write = true;
-        //printf("Now playing sample: %d\n", ram_buffer_start[LOOP_BUFFER]);
-    }
-
     if (state == FIRST_RECORD) {
         loop_length++;
-        if (loop_length >= 3 * BUFFER_SIZE) {
+        if (loop_length >= 3*BUFFER_SIZE){//5 * BUFFER_SIZE / 2) {
             state = RECORD_OVER;
             printf("Loop length is %d\n", loop_length);
             //which = !which;
@@ -118,6 +104,20 @@ bool timer_callback(repeating_timer_t* rt)
             //ram_buffer_start[LOOP_BUFFER] = 0;
             //ram_buffer_start[PSRAM_ACCESS_BUFFER] = BUFFER_SIZE;
         }
+    }
+
+    if (ram_buffer_offset[LOOP_BUFFER] >= BUFFER_SIZE) {
+        // we're out of bounds, so we need to swap buffers
+        ram_buffer_offset[LOOP_BUFFER] = 0;
+        which = !which; // swap buffers. The other buffer must contain the next audio to be played
+
+        // special hack for first reads
+        if (state == FIRST_RECORD) ram_buffer_start[LOOP_BUFFER] = ram_buffer_start[PSRAM_ACCESS_BUFFER] + BUFFER_SIZE;
+        
+        sample_num = ram_buffer_start[PSRAM_ACCESS_BUFFER]; // TODO: this is the current calculation. might change
+        size_t data_size = BUFFER_SIZE * 2;
+        signal_write = true;
+        //printf("Now playing sample: %d\n", ram_buffer_start[LOOP_BUFFER]);
     }
 
     if (loop_time >= loop_length) {
@@ -132,18 +132,19 @@ int main()
 {
     tusb_init();
     stdio_init_all();
-    printf("ADC Example, measuring GPIO26\n");
 
     //TODO: delete
     for (int i = 0; i < BUFFER_SIZE; i++) {
         ram_buffer[0][i][MAIN_SAMPLE] = 0;
         ram_buffer[1][i][MAIN_SAMPLE] = 0;
-        ram_buffer[0][i][ACTIVE_SAMPLE] =0;
+        ram_buffer[0][i][ACTIVE_SAMPLE] = 0;
         ram_buffer[1][i][ACTIVE_SAMPLE] = 0;
     }
-    // write blocking
+
     ram_buffer_start[0] = 0;
     ram_buffer_start[1] = 0;
+    ram_buffer_offset[0] = 0;
+    ram_buffer_offset[1] = 0;
 
     // Initialize the PSRAM
     ice_sram_init();
@@ -175,7 +176,8 @@ int main()
     while (1) {
         tud_task(); // tinyusb device task
         if (signal_write) {
-            printf("Writing to address %d, var which is %d\n", psram_address / 2, which);
+            uint32_t psram_address = sample_num * 2;
+            printf("Writing to address %d, var which is %d\n", psram_address/2, which);
             ice_sram_write_blocking(psram_address, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], BUFFER_SIZE * 2);// write_callback, NULL);
                 
             // calculate the next block to load. 
@@ -189,7 +191,6 @@ int main()
             if (next_start >= loop_length) {
                 // we're done recording
                 next_start = 0;
-                //printf("Wrapping around because next_start is %d\n", next_start);
             }
             int num_samples_read = BUFFER_SIZE * 2;
             uint next_address = next_start * 2; // TODO: this is the current calculation. might change
@@ -197,7 +198,7 @@ int main()
             ram_buffer_start[PSRAM_ACCESS_BUFFER] = next_start;
             psram_address = next_address;
 
-            printf("Reading from address %d, var which is %d\n", psram_address / 2, which);
+            printf("Reading from address %d, var which is %d\n", psram_address/2, which);
             ice_sram_read_blocking(psram_address, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], BUFFER_SIZE * 2);
             signal_write = false;
         }
