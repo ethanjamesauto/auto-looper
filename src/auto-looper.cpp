@@ -215,14 +215,10 @@ int main()
     // Start the sampling timer at about 44.1 kHz
     add_repeating_timer_us(SAMPLE_RATE_US, process_sample, NULL, &timer);
 
-    //new_loop_length = bpm_to_samples(120);
-
-    // It seems as if something needs to be running in the main loop for the program to work. TODO: confirm this
-    //*
     while (1) {
         tud_task(); // tinyusb device task
         if (signal_write) {
             write_routine();
         }
-    }//*/
+    }
 }

@@ -31,6 +31,7 @@ add_executable(
   auto-looper 
   src/auto-looper.cpp
   src/stdio_mem.cpp
+  src/button.cpp
 )
 
 pico_set_program_name(auto-looper "auto-looper")
