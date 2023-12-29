@@ -58,6 +58,8 @@ state_type state = IDLE;
 volatile bool signal_write = false;
 
 // TODO: stop using PSRAM for short loop lengths. Minimum loop length right now is BUFFER_SIZE
+// TODO: break up into inline functions
+
 /**
  * @brief Callback function for the repeating timer. Runs at the sample rate.
  */
@@ -196,6 +198,9 @@ void write_routine() {
     signal_write = false;
 }
 
+/**
+ * @brief Called when the footswitch is pressed or released.
+*/
 void footswitch_onchange(button_t *button_p) {
     button_t *button = (button_t*)button_p;
     // printf("Button on pin %d changed its state to %d\n", button->pin, button->state);
