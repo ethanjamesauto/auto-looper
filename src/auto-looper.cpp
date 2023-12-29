@@ -14,19 +14,20 @@
 // tinyusb
 #include "tusb.h"
 
-#include "stdio_mem.h"
+#include "button.h"
 
 repeating_timer_t timer;
 uint slice_num;
 uint channel;
 
 #define OUTPUT_PIN 5 // The PWM DAC output pin
+#define FOOTSWITCH_PIN 21 // The footswitch pin
 
 #define SKIP 4 // number of ADC bits to not use. This should be set to 4 at the moment due to data being stored as bytes.
 #define PWM_PERIOD (4096 >> SKIP)
 #define SAMPLE_RATE_US 23 // about 44.1 kHz
 
-#define BUFFER_SIZE (50*1024) // Size in 2 SAMPLES (one active, one main). Max of 200k samples (now 100k because we use 2 buffers)
+#define BUFFER_SIZE (4*1024) // Size in 2 SAMPLES (one active, one main). Max of 200k samples (now 100k because we use 2 buffers)
 
 uint8_t ram_buffer[2][BUFFER_SIZE][2];
 uint ram_buffer_start[2];
@@ -39,6 +40,9 @@ bool which = false;
 #define PSRAM_ACCESS_BUFFER (!which)   // the buffer that is read from and then written to by PSRAM
 #define LOOP_BUFFER which        // the buffer that is used for looping by the CPU
 
+// button single press
+bool single_press = false;
+
 // used for ram_buffer indexing
 #define MAIN_SAMPLE 0
 #define ACTIVE_SAMPLE 1
@@ -50,9 +54,10 @@ enum state_type {
     PLAYBACK,
 };
 
-state_type state = FIRST_RECORD; // TODO: change this
+state_type state = IDLE;
 volatile bool signal_write = false;
 
+// TODO: stop using PSRAM for short loop lengths. Minimum loop length right now is BUFFER_SIZE
 /**
  * @brief Callback function for the repeating timer. Runs at the sample rate.
  */
@@ -64,11 +69,27 @@ bool process_sample(repeating_timer_t* rt)
     uint16_t result = adc_read();
     uint8_t current = (result >> SKIP) /*- 128*/; // convert to signed 8-bit value
 
-    uint index = ram_buffer_offset[LOOP_BUFFER]++;
+
+    if (single_press) {
+        if (state != FIRST_RECORD) single_press = false; // TODO: quick hack
+
+        if (state == IDLE) {
+            state = FIRST_RECORD;
+        } else if (state == RECORD_OVER) {
+            state = PLAYBACK;
+        } else if (state == PLAYBACK) {
+            state = RECORD_OVER;
+        }
+    }
 
     // add the current and looped values together, then write back
+    uint index = 0;
+    if (state != IDLE) {
+        index = ram_buffer_offset[LOOP_BUFFER]++;
+    }
+
     uint8_t mixed;
-    if (state == FIRST_RECORD) {
+    if (state == FIRST_RECORD || state == IDLE) {
         mixed = current;
     } else {
         mixed = ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE] + ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] + current;
@@ -78,6 +99,8 @@ bool process_sample(repeating_timer_t* rt)
     if (state == IDLE) { 
         return true; // we're done
     }
+    
+    loop_time++;
 
     if (state == RECORD_OVER) {
         ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE] += ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE];
@@ -87,11 +110,11 @@ bool process_sample(repeating_timer_t* rt)
         ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = 0;
     }
     
-    loop_time++;    
 
     if (state == FIRST_RECORD) {
         loop_length++;
-        if (loop_length >= 44100*30){//5 * BUFFER_SIZE / 2) {
+        if (single_press) {
+            single_press = false;
             state = RECORD_OVER;
             printf("Loop length is %d\n", loop_length);
             which = !which;
@@ -173,6 +196,14 @@ void write_routine() {
     signal_write = false;
 }
 
+void footswitch_onchange(button_t *button_p) {
+    button_t *button = (button_t*)button_p;
+    // printf("Button on pin %d changed its state to %d\n", button->pin, button->state);
+
+    if(button->state) return; // Ignore button release.
+
+    single_press = true;
+}
 
 int main()
 {
@@ -211,6 +242,9 @@ int main()
     pwm_set_wrap(slice_num, PWM_PERIOD);
     pwm_set_chan_level(slice_num, channel, 100);
     pwm_set_enabled(slice_num, true);
+
+    // initialize the footswitch button
+    button_t* footswitch = create_button(FOOTSWITCH_PIN, footswitch_onchange);
 
     // Start the sampling timer at about 44.1 kHz
     add_repeating_timer_us(SAMPLE_RATE_US, process_sample, NULL, &timer);
