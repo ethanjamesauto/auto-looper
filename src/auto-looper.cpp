@@ -168,17 +168,13 @@ void write_routine() {
     ram_buffer_offset[PSRAM_ACCESS_BUFFER] = 0;
         
     // calculate the next block to load. 
-    uint next_start;
     if (state == FIRST_RECORD) {
-        next_start = 0; // we need to keep the first block ready for when the user hits the button
+        sample_num = 0; // we need to keep the first block ready for when the user hits the button
     } else {
-        next_start = (ram_buffer_start[LOOP_BUFFER] + BUFFER_SIZE) % loop_length;
+        sample_num = (ram_buffer_start[LOOP_BUFFER] + BUFFER_SIZE) % loop_length;
     }
 
-    int num_samples_read = BUFFER_SIZE * 2;
-    uint next_size = num_samples_read * 2;
-    ram_buffer_start[PSRAM_ACCESS_BUFFER] = next_start;
-    sample_num = next_start;
+    ram_buffer_start[PSRAM_ACCESS_BUFFER] = sample_num;
     if (sample_num + BUFFER_SIZE > loop_length) {
         uint read_size_one = loop_length - sample_num;
         uint read_size_two = BUFFER_SIZE - read_size_one;
