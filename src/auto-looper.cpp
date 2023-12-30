@@ -155,13 +155,13 @@ void write_routine() {
         uint32_t psram_size_two = write_size_two * 2;
         uint32_t psram_address_one = sample_num * 2;
         uint32_t psram_address_two = 0;
-        printf("Writing to address %d, var which is %d, writing %d samples\n", psram_address_one/2, which, write_size_one);
+        // printf("Writing to address %d, var which is %d, writing %d samples\n", psram_address_one/2, which, write_size_one);
         ice_sram_write_blocking(psram_address_one, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], psram_size_one);
-        printf("Also writing to address %d, writing %d samples\n", psram_address_two/2, write_size_two);
+        // printf("Also writing to address %d, writing %d samples\n", psram_address_two/2, write_size_two);
         ice_sram_write_blocking(psram_address_two, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER][write_size_one], psram_size_two);
     } else {
         uint32_t psram_address = sample_num * 2;
-        printf("Writing to address %d, var which is %d, writing %d samples\n", psram_address/2, which, num_write);
+        // printf("Writing to address %d, var which is %d, writing %d samples\n", psram_address/2, which, num_write);
         ice_sram_write_blocking(psram_address, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], num_write * 2);// write_callback, NULL);
     }
 
@@ -182,13 +182,13 @@ void write_routine() {
         uint32_t psram_size_two = read_size_two * 2;
         uint32_t psram_address_one = sample_num * 2;
         uint32_t psram_address_two = 0;
-        printf("Reading from address %d, var which is %d\n", psram_address_one/2, which);
+        // printf("Reading from address %d, var which is %d\n", psram_address_one/2, which);
         ice_sram_read_blocking(psram_address_one, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], psram_size_one);
-        printf("Also reading from address %d, reading %d samples\n", psram_address_two/2, read_size_two);
+        // printf("Also reading from address %d, reading %d samples\n", psram_address_two/2, read_size_two);
         ice_sram_read_blocking(psram_address_two, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER][read_size_one], psram_size_two);
     } else {
         uint32_t psram_address = sample_num * 2;
-        printf("Reading from address %d, var which is %d\n", psram_address/2, which);
+        // printf("Reading from address %d, var which is %d\n", psram_address/2, which);
         ice_sram_read_blocking(psram_address, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], BUFFER_SIZE * 2);// read_callback, NULL);
     }
     signal_write = false;

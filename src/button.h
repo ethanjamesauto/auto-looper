@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define DEBOUNCE_US 200
+#define DEBOUNCE_US 2000
 
 typedef struct button_t {
   uint8_t pin;
