@@ -15,19 +15,20 @@
 #include "tusb.h"
 
 #include "button.h"
+#include "i2s.h"
 
 repeating_timer_t timer;
 uint slice_num;
 uint channel;
 
 #define OUTPUT_PIN 5 // The PWM DAC output pin
-#define FOOTSWITCH_PIN 21 // The footswitch pin
+#define FOOTSWITCH_PIN 6 // The footswitch pin
 
 #define SKIP 4 // number of ADC bits to not use. This should be set to 4 at the moment due to data being stored as bytes.
 #define PWM_PERIOD (4096 >> SKIP)
 #define SAMPLE_RATE_US 23 // about 44.1 kHz
 
-#define BUFFER_SIZE (4*1024) // Size in 2 SAMPLES (one active, one main). Max of 200k samples (now 100k because we use 2 buffers)
+#define BUFFER_SIZE (128) // Size in 2 SAMPLES (one active, one main). Max of 200k samples (now 100k because we use 2 buffers)
 
 uint8_t ram_buffer[2][BUFFER_SIZE][2];
 uint ram_buffer_start[2];
@@ -57,20 +58,17 @@ enum state_type {
 state_type state = IDLE;
 volatile bool signal_write = false;
 
+static __attribute__((aligned(8))) pio_i2s i2s;
+
 // TODO: stop using PSRAM for short loop lengths. Minimum loop length right now is BUFFER_SIZE
 // TODO: break up into inline functions
 
 /**
  * @brief Callback function for the repeating timer. Runs at the sample rate.
  */
-bool process_sample(repeating_timer_t* rt)
+uint8_t process_sample(uint8_t sample)
 {
-    bool do_write;
-    bool do_playback;
-
-    uint16_t result = adc_read();
-    uint8_t current = (result >> SKIP) /*- 128*/; // convert to signed 8-bit value
-
+    uint8_t current = sample;
 
     if (single_press) {
         if (state != FIRST_RECORD) single_press = false; // TODO: quick hack
@@ -79,8 +77,10 @@ bool process_sample(repeating_timer_t* rt)
             state = FIRST_RECORD;
         } else if (state == RECORD_OVER) {
             state = PLAYBACK;
+            printf("Done recording\n");
         } else if (state == PLAYBACK) {
             state = RECORD_OVER;
+            printf("Recording again\n");
         }
     }
 
@@ -96,10 +96,10 @@ bool process_sample(repeating_timer_t* rt)
     } else {
         mixed = ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE] + ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] + current;
     }
-    pwm_set_chan_level(slice_num, channel, mixed);
+    //pwm_set_chan_level(slice_num, channel, mixed);
 
     if (state == IDLE) { 
-        return true; // we're done
+        return mixed; // we're done
     }
     
     loop_time++;
@@ -118,6 +118,7 @@ bool process_sample(repeating_timer_t* rt)
         if (single_press) {
             single_press = false;
             state = RECORD_OVER;
+            loop_length = (loop_length / BUFFER_SIZE) * BUFFER_SIZE; // TODO: tmp
             printf("Loop length is %d\n", loop_length);
             which = !which;
             // printf("Loop buffer start is %d, and PSRAM buffer start is %d\n", ram_buffer_start[LOOP_BUFFER], ram_buffer_start[PSRAM_ACCESS_BUFFER]);
@@ -142,7 +143,33 @@ done:
         loop_time = 0;
     }
 
-    return true; // keep repeating
+    return mixed;
+}
+
+static void process_audio(const int32_t* input, int32_t* output, size_t num_frames) {
+    // Just copy the input to the output
+    for (size_t i = 0; i < num_frames * 2; i++) {
+        output[i] = process_sample(input[i] >> 24) << 24;
+        i++;
+        if (i < num_frames * 2) {
+            output[i] = output[i-1];
+        }
+    }
+}
+
+static void dma_i2s_in_handler(void) {
+        dma_hw->ints0 = 1u << i2s.dma_ch_in_data;  // clear the IRQ
+    /* We're double buffering using chained TCBs. By checking which buffer the
+     * DMA is currently reading from, we can identify which buffer it has just
+     * finished reading (the completion of which has triggered this interrupt).
+     */
+    if (*(int32_t**)dma_hw->ch[i2s.dma_ch_in_ctrl].read_addr == i2s.input_buffer) {
+        // It is inputting to the second buffer so we can overwrite the first
+        process_audio(i2s.input_buffer, i2s.output_buffer, AUDIO_BUFFER_FRAMES);
+    } else {
+        // It is currently inputting the first buffer, so we write to the second
+        process_audio(&i2s.input_buffer[STEREO_BUFFER_SIZE], &i2s.output_buffer[STEREO_BUFFER_SIZE], AUDIO_BUFFER_FRAMES);
+    }
 }
 
 void write_routine() {
@@ -199,7 +226,7 @@ void write_routine() {
 */
 void footswitch_onchange(button_t *button_p) {
     button_t *button = (button_t*)button_p;
-    // printf("Button on pin %d changed its state to %d\n", button->pin, button->state);
+    //printf("Button on pin %d changed its state to %d\n", button->pin, button->state);
 
     if(button->state) return; // Ignore button release.
 
@@ -208,6 +235,7 @@ void footswitch_onchange(button_t *button_p) {
 
 int main()
 {
+    //set_sys_clock_khz(132000, true);
     tusb_init();
     stdio_init_all();
 
@@ -224,31 +252,24 @@ int main()
     ram_buffer_offset[0] = 0;
     ram_buffer_offset[1] = 0;
 
+
+    i2s_config my_config;
+    my_config.fs = 48000;
+    my_config.sck_mult = 256;
+    my_config.bit_depth = 16;
+    my_config.sck_pin = 21;
+    my_config.dout_pin = 18;
+    my_config.din_pin = 22;
+    my_config.clock_pin_base = 19;
+    my_config.sck_enable = true;
+
+    i2s_program_start_synched(pio0, &my_config, dma_i2s_in_handler, &i2s);
+    
     // Initialize the PSRAM
     ice_sram_init();
-    ice_sram_reset();
-
-    // Initialize the ADC
-    adc_init();
-
-    // Make sure GPIO is high-impedance, no pullups etc
-    adc_gpio_init(26);
-    // Select ADC input 0 (GPIO26)
-    adc_select_input(0);
-
-    // initialize PWM - a simple PWM dac is used for testing
-    gpio_set_function(OUTPUT_PIN, GPIO_FUNC_PWM);
-    slice_num = pwm_gpio_to_slice_num(OUTPUT_PIN);
-    channel = pwm_gpio_to_channel(OUTPUT_PIN);
-    pwm_set_wrap(slice_num, PWM_PERIOD);
-    pwm_set_chan_level(slice_num, channel, 100);
-    pwm_set_enabled(slice_num, true);
 
     // initialize the footswitch button
     button_t* footswitch = create_button(FOOTSWITCH_PIN, footswitch_onchange);
-
-    // Start the sampling timer at about 44.1 kHz
-    add_repeating_timer_us(SAMPLE_RATE_US, process_sample, NULL, &timer);
 
     while (1) {
         tud_task(); // tinyusb device task

@@ -30,8 +30,11 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/pico-ice-sdk)
 add_executable(
   auto-looper 
   src/auto-looper.cpp
+  src/i2s.cpp
   src/button.cpp
 )
+
+pico_generate_pio_header(auto-looper ${CMAKE_CURRENT_LIST_DIR}/src/i2s.pio)
 
 pico_set_program_name(auto-looper "auto-looper")
 pico_set_program_version(auto-looper "0.1")
