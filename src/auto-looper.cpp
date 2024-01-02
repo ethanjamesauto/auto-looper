@@ -55,7 +55,7 @@ enum state_type {
     PLAYBACK,
 };
 
-state_type state = STATE_IDLE;
+state_type state2 = STATE_IDLE;
 volatile bool signal_write = false;
 
 static __attribute__((aligned(8))) pio_i2s i2s;
@@ -71,53 +71,53 @@ uint8_t process_sample(uint8_t sample)
     uint8_t current = sample;
 
     if (single_press) {
-        if (state != STATE_FIRST_RECORD) single_press = false; // TODO: quick hack
+        if (state2 != STATE_FIRST_RECORD) single_press = false; // TODO: quick hack
 
-        if (state == STATE_IDLE) {
-            state = STATE_FIRST_RECORD;
-        } else if (state == RECORD_OVER) {
-            state = PLAYBACK;
+        if (state2 == STATE_IDLE) {
+            state2 = STATE_FIRST_RECORD;
+        } else if (state2 == RECORD_OVER) {
+            state2 = PLAYBACK;
             printf("Done recording\n");
-        } else if (state == PLAYBACK) {
-            state = RECORD_OVER;
+        } else if (state2 == PLAYBACK) {
+            state2 = RECORD_OVER;
             printf("Recording again\n");
         }
     }
 
     // add the current and looped values together, then write back
     uint index = 0;
-    if (state != STATE_IDLE) {
+    if (state2 != STATE_IDLE) {
         index = ram_buffer_offset[LOOP_BUFFER]++;
     }
 
     uint8_t mixed;
-    if (state == STATE_FIRST_RECORD || state == STATE_IDLE) {
+    if (state2 == STATE_FIRST_RECORD || state2 == STATE_IDLE) {
         mixed = current;
     } else {
         mixed = ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE] + ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] + current;
     }
     //pwm_set_chan_level(slice_num, channel, mixed);
 
-    if (state == STATE_IDLE) { 
+    if (state2 == STATE_IDLE) { 
         return mixed; // we're done
     }
     
     loop_time++;
 
-    if (state == RECORD_OVER) {
+    if (state2 == RECORD_OVER) {
         ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE] += ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE];
         ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = current;
-    } else if (state == STATE_FIRST_RECORD) {
+    } else if (state2 == STATE_FIRST_RECORD) {
         ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = current;
         ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = 0;
     }
     
 
-    if (state == STATE_FIRST_RECORD) {
+    if (state2 == STATE_FIRST_RECORD) {
         loop_length++;
         if (single_press) {
             single_press = false;
-            state = RECORD_OVER;
+            state2 = RECORD_OVER;
             loop_length = (loop_length / BUFFER_SIZE) * BUFFER_SIZE; // TODO: tmp
             printf("Loop length is %d\n", loop_length);
             which = !which;
@@ -133,7 +133,7 @@ uint8_t process_sample(uint8_t sample)
         which = !which; // swap buffers. The other buffer must contain the next audio to be played
 
         // special hack for first reads
-        if (state == STATE_FIRST_RECORD) ram_buffer_start[LOOP_BUFFER] = ram_buffer_start[PSRAM_ACCESS_BUFFER] + BUFFER_SIZE;
+        if (state2 == STATE_FIRST_RECORD) ram_buffer_start[LOOP_BUFFER] = ram_buffer_start[PSRAM_ACCESS_BUFFER] + BUFFER_SIZE;
 
         signal_write = true;
     }
@@ -195,7 +195,7 @@ void write_routine() {
     ram_buffer_offset[PSRAM_ACCESS_BUFFER] = 0;
         
     // calculate the next block to load. 
-    if (state == STATE_FIRST_RECORD) {
+    if (state2 == STATE_FIRST_RECORD) {
         sample_num = 0; // we need to keep the first block ready for when the user hits the button
     } else {
         sample_num = (ram_buffer_start[LOOP_BUFFER] + BUFFER_SIZE) % loop_length;
@@ -239,7 +239,7 @@ const char* state_names[] = {
 bool button_released = true;
 bool button_pressed = false;
 uint64_t last_time = 0;
-state_t state_var = IDLE;
+state_t state = IDLE;
 
 /**
  * @brief Called when the footswitch is pressed or released.
@@ -275,29 +275,26 @@ inline const char* get_state_type(state_t state) {
 }
 
 inline void update_state(state_t new_state) {
-    state_var = new_state;
+    state = new_state;
     reset_button();
-    printf("State changed to %s\n", state_names[state_var]);
-    printf("Current status: %s\n\n", get_state_type(state_var));
+    printf("State changed to %s\n", state_names[state]);
+    printf("Current status: %s\n\n", get_state_type(state));
 }
 
 void sm() {
-    
-    state_t old_state = state_var;
-
-    if (state_var == IDLE) {
+    if (state == IDLE) {
         if (button_pressed && button_released) {
             update_state(FIRST_RECORD);
         }
     }
 
-    if (state_var == FIRST_RECORD) {
+    if (state == FIRST_RECORD) {
         if (button_pressed && button_released) {
             update_state(FIRST_PLAYBACK);
         }
     }
 
-    if (state_var == FIRST_PLAYBACK) {
+    if (state == FIRST_PLAYBACK) {
         if (button_pressed && button_released) {
             if (second_passed()) {
                 update_state(FIRST_TMP_RECORD);
@@ -307,7 +304,7 @@ void sm() {
         }
     }
 
-    if (state_var == FIRST_STOP) {
+    if (state == FIRST_STOP) {
         if (button_pressed && button_released) {
             update_state(FIRST_PLAYBACK);
         } else if (button_released) {
@@ -317,24 +314,26 @@ void sm() {
         }
     }
 
-    if (state_var == FIRST_TMP_RECORD) {
+    if (state == FIRST_TMP_RECORD) {
         if (!button_pressed && !button_released && second_passed()) {
+            // invalidate tmp buffer
             update_state(IDLE);
         } else if (button_pressed && button_released && !second_passed()) {
+            // invalidate tmp buffer
             update_state(STOPPED);
         } else if (second_passed()) {
             update_state(RECORD);
         }
     }
 
-    if (state_var == RECORD) {
+    if (state == RECORD) {
         if (button_pressed /* && button_released*/) {
             update_state(PLAY);
         }
     }
 
-    if (state_var == PLAY) {
-        if (button_pressed) {
+    if (state == PLAY) {
+        if (button_pressed /* && button_released*/) {
             if (second_passed()) {
                 update_state(TEMP_RECORD);
             } else {
@@ -343,17 +342,19 @@ void sm() {
         }
     }
 
-    if (state_var == TEMP_RECORD) {
+    if (state == TEMP_RECORD) {
         if (!button_pressed && !button_released && second_passed()) {
+            // invalidate tmp buffer
             update_state(PLAY);
         } else if (button_pressed && button_released && !second_passed()) {
+            // invalidate tmp buffer
             update_state(STOPPED);
         } else if (button_released && second_passed()) {
             update_state(RECORD);
         }
     }
 
-    if (state_var == STOPPED) {
+    if (state == STOPPED) {
         if (button_pressed && button_released) {
             update_state(PLAYBACK1);
         } else if (!button_released && second_passed()) {
@@ -361,7 +362,7 @@ void sm() {
         }
     }
 
-    if (state_var == PLAYBACK1) {
+    if (state == PLAYBACK1) {
         if (button_released && second_passed()) {
             update_state(PLAY);
         } else if (!button_released && second_passed()) {
