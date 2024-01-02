@@ -17,25 +17,14 @@
 
 #define FOOTSWITCH_PIN 6 // The footswitch pin
 
-#define BUFFER_SIZE (128) // Size in 2 SAMPLES (one active, one main). Max of 200k samples (now 100k because we use 2 buffers)
+looper_t looper;
 
-int16_t ram_buffer[2][BUFFER_SIZE][2];
-uint ram_buffer_start[2];
-uint ram_buffer_offset[2];
-uint loop_length = 0; // loop length in samples (2ish seconds maybe)
-uint loop_time = 0; // current time in samples
-
-// buffer swapping variables
-bool which = false;
-#define PSRAM_ACCESS_BUFFER (!which)   // the buffer that is read from and then written to by PSRAM
-#define LOOP_BUFFER which        // the buffer that is used for looping by the CPU
-
-// used for ram_buffer indexing
-#define MAIN_SAMPLE 0
-#define ACTIVE_SAMPLE 1
+#define PSRAM_ACCESS_BUFFER (!looper.which)   // the buffer that is read from and then written to by PSRAM
+#define LOOP_BUFFER (looper.which)            // the buffer that is used for looping by the CPU
 
 // used to tell the main loop to write to PSRAM and then read from it
 volatile bool signal_write = false; 
+volatile uint read_location = 0;
 
 static __attribute__((aligned(8))) pio_i2s i2s; // i2s instance
 
@@ -58,7 +47,6 @@ bool button_released = true;
 bool button_pressed = false;
 uint64_t last_time = 0;
 state_t state = IDLE;
-uint read_location = 0;
 
 // TODO: stop using PSRAM for short loop lengths. Minimum loop length right now is BUFFER_SIZE
 
@@ -89,8 +77,8 @@ static void dma_i2s_in_handler(void) {
 }
 
 void write_routine() {
-    uint write_size = ram_buffer_offset[PSRAM_ACCESS_BUFFER];
-    uint write_location = ram_buffer_start[PSRAM_ACCESS_BUFFER];
+    uint write_size = looper.buffer_offset[PSRAM_ACCESS_BUFFER];
+    uint write_location = looper.buffer_start[PSRAM_ACCESS_BUFFER];
     /*if (sample_num + num_write > loop_length) {
         uint write_size_one = loop_length - sample_num;
         uint write_size_two = num_write - write_size_one;
@@ -106,11 +94,11 @@ void write_routine() {
         uint32_t psram_address = write_location * 4;
         uint32_t psram_write_size = write_size * 4;
         //printf("Writing to address %d, var which is %d, writing %d samples\n", psram_address/2, which, write_size);
-        ice_sram_write_blocking(psram_address, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], psram_write_size);// write_callback, NULL);
+        ice_sram_write_blocking(psram_address, (uint8_t*) looper.buffer[PSRAM_ACCESS_BUFFER], psram_write_size);// write_callback, NULL);
     }
 
-    ram_buffer_offset[PSRAM_ACCESS_BUFFER] = 0;
-    ram_buffer_start[PSRAM_ACCESS_BUFFER] = read_location;
+    looper.buffer_offset[PSRAM_ACCESS_BUFFER] = 0;
+    looper.buffer_start[PSRAM_ACCESS_BUFFER] = read_location;
     /*if (sample_num + BUFFER_SIZE > loop_length) {
         uint read_size_one = loop_length - sample_num;
         uint read_size_two = BUFFER_SIZE - read_size_one;
@@ -126,7 +114,7 @@ void write_routine() {
         uint32_t psram_address = read_location * 4;
         uint32_t psram_write_size = BUFFER_SIZE * 4;
         //printf("Reading from address %d, var which is %d\n", psram_address/2, which);
-        ice_sram_read_blocking(psram_address, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], psram_write_size);// read_callback, NULL);
+        ice_sram_read_blocking(psram_address, (uint8_t*) looper.buffer[PSRAM_ACCESS_BUFFER], psram_write_size);// read_callback, NULL);
     }
     signal_write = false;
 }
@@ -168,12 +156,7 @@ inline void update_state(state_t new_state) {
     state = new_state;
 
     if (state == IDLE) {
-        loop_length = 0;
-        loop_time = 0;
-        ram_buffer_offset[LOOP_BUFFER] = 0;
-        ram_buffer_start[LOOP_BUFFER] = 0;
-        ram_buffer_offset[PSRAM_ACCESS_BUFFER] = 0;
-        ram_buffer_start[PSRAM_ACCESS_BUFFER] = 0;
+        looper = looper_t(); // reset the looper
     }
 
     reset_button();
@@ -202,8 +185,8 @@ int16_t get_next_sample(int16_t current) {
 
     if (state == FIRST_RECORD) {
         if (button_pressed && button_released) {
-            loop_length = (loop_length / BUFFER_SIZE) * BUFFER_SIZE; // TODO: tmp
-            printf("Loop length: %d\n\n", loop_length);
+            looper.loop_length = (looper.loop_length / BUFFER_SIZE) * BUFFER_SIZE; // TODO: tmp
+            printf("Loop length: %d\n\n", looper.loop_length);
             update_state(FIRST_PLAYBACK);
         }
     }
@@ -292,48 +275,49 @@ int16_t get_next_sample(int16_t current) {
     // add the current and looped values together, then write back
     uint index = 0;
     if (state != IDLE && state != STOPPED && state != FIRST_STOP) {
-        index = ram_buffer_offset[LOOP_BUFFER]++;
+        index = looper.buffer_offset[LOOP_BUFFER]++;
     }
 
     int16_t mixed;
     if (state == FIRST_RECORD || state == IDLE || state == STOPPED || state == FIRST_STOP) {
         mixed = current;
     } else {
-        mixed = add(add(ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE], ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE]), current);
+        mixed = add(add(looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE], looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE]), current);
     }
 
     if (state == IDLE || state == STOPPED || state == FIRST_STOP) { 
         return mixed; // we're done
     }
     
-    loop_time++;
-    if (state == FIRST_RECORD) loop_length++;
+    looper.loop_time++;
+    if (state == FIRST_RECORD) looper.loop_length++;
 
     if (state == RECORD || state == TEMP_RECORD || state == FIRST_TMP_RECORD) {
-        ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = add(ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE], ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE]);
-        ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = current;
+        looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = add(looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE], looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE]);
+        looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = current;
     } else if (state == FIRST_RECORD) {
-        ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = current;
-        ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = 0;
+        looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = current;
+        looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = 0;
     }
 
-    if (ram_buffer_offset[LOOP_BUFFER] >= BUFFER_SIZE) {
+    if (looper.buffer_offset[LOOP_BUFFER] >= BUFFER_SIZE) {
         // we're out of bounds, so we need to swap buffers
-        which = !which; // swap buffers. The other buffer must contain the next audio to be played
+        looper.which = !looper.which; // swap buffers. The other buffer must contain the next audio to be played
 
         // special hack for first reads
         if (state == FIRST_RECORD) {
-            ram_buffer_start[LOOP_BUFFER] = ram_buffer_start[PSRAM_ACCESS_BUFFER] + BUFFER_SIZE;
+            looper.buffer_start[LOOP_BUFFER] = looper.buffer_start[PSRAM_ACCESS_BUFFER] + BUFFER_SIZE;
             read_location = 0; // always read from 0 for first_record
         } else {
-            read_location = (ram_buffer_start[LOOP_BUFFER] + BUFFER_SIZE) % loop_length;
+            read_location = (looper.buffer_start[LOOP_BUFFER] + BUFFER_SIZE) % looper.loop_length;
         }
 
+        // TODO: see if signal_write is true here, and signal an error if it is.
         signal_write = true;
     }
 
-    if (loop_time >= loop_length) {
-        loop_time = 0;
+    if (looper.loop_time >= looper.loop_length) {
+        looper.loop_time = 0;
     }
 
     return mixed;
@@ -344,12 +328,6 @@ int main()
     set_sys_clock_khz(132000, true);
     tusb_init();
     stdio_init_all();
-
-    ram_buffer_start[0] = 0;
-    ram_buffer_start[1] = 0;
-    ram_buffer_offset[0] = 0;
-    ram_buffer_offset[1] = 0;
-
 
     i2s_config my_config;
     my_config.fs = 48000;
