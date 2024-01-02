@@ -1,15 +1,11 @@
-#include "hardware/adc.h"
 #include "hardware/clocks.h"
 #include "hardware/dma.h"
 #include "hardware/pio.h"
-#include "hardware/pwm.h"
-#include "hardware/spi.h"
-#include "hardware/timer.h"
 #include "pico/stdlib.h"
-#include <stdio.h>
 
 #include "boards/pico_ice.h"
 #include "ice_sram.h"
+#include "pico/stdlib.h"
 
 // tinyusb
 #include "tusb.h"
@@ -17,16 +13,9 @@
 #include "button.h"
 #include "i2s.h"
 
-repeating_timer_t timer;
-uint slice_num;
-uint channel;
+#include "auto_looper.h"
 
-#define OUTPUT_PIN 5 // The PWM DAC output pin
 #define FOOTSWITCH_PIN 6 // The footswitch pin
-
-#define SKIP 4 // number of ADC bits to not use. This should be set to 4 at the moment due to data being stored as bytes.
-#define PWM_PERIOD (4096 >> SKIP)
-#define SAMPLE_RATE_US 23 // about 44.1 kHz
 
 #define BUFFER_SIZE (128) // Size in 2 SAMPLES (one active, one main). Max of 200k samples (now 100k because we use 2 buffers)
 
@@ -41,18 +30,14 @@ bool which = false;
 #define PSRAM_ACCESS_BUFFER (!which)   // the buffer that is read from and then written to by PSRAM
 #define LOOP_BUFFER which        // the buffer that is used for looping by the CPU
 
-// button single press
-bool single_press = false;
-
 // used for ram_buffer indexing
 #define MAIN_SAMPLE 0
 #define ACTIVE_SAMPLE 1
 
-int16_t sm(int16_t current);
+// used to tell the main loop to write to PSRAM and then read from it
+volatile bool signal_write = false; 
 
-volatile bool signal_write = false;
-
-static __attribute__((aligned(8))) pio_i2s i2s;
+static __attribute__((aligned(8))) pio_i2s i2s; // i2s instance
 
 enum state_t { 
     IDLE, 
@@ -81,7 +66,7 @@ uint read_location = 0;
 static void process_audio(const int32_t* input, int32_t* output, size_t num_frames) {
     // Just copy the input to the output
     for (size_t i = 0; i < num_frames * 2; i++) {
-        output[i] = sm(input[i] >> 16) << 16;
+        output[i] = get_next_sample(input[i] >> 16) << 16;
         i++;
         if (i < num_frames * 2) {
             output[i] = output[i-1];
@@ -200,7 +185,7 @@ inline void update_state(state_t new_state) {
 /**
  * Add two signed ints, but if the result overflows or underflows, clip instead
 */
-inline constexpr int16_t add_no_overflow(int16_t a, int16_t b) {
+inline constexpr int16_t add(int16_t a, int16_t b) {
     int16_t result = a + b;
     if ((a > 0 && b > 0 && result < 0) || (a < 0 && b < 0 && result > 0)) {
         return a > 0 ? INT16_MAX : INT16_MIN;
@@ -208,7 +193,7 @@ inline constexpr int16_t add_no_overflow(int16_t a, int16_t b) {
     return result;
 }
 
-int16_t sm(int16_t current) {
+int16_t get_next_sample(int16_t current) {
 
     if (state == IDLE) {
         if (button_pressed && button_released) {
@@ -315,7 +300,7 @@ int16_t sm(int16_t current) {
     if (state == FIRST_RECORD || state == IDLE || state == STOPPED || state == FIRST_STOP) {
         mixed = current;
     } else {
-        mixed = add_no_overflow(add_no_overflow(ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE], ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE]), current);
+        mixed = add(add(ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE], ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE]), current);
     }
 
     if (state == IDLE || state == STOPPED || state == FIRST_STOP) { 
@@ -326,7 +311,7 @@ int16_t sm(int16_t current) {
     if (state == FIRST_RECORD) loop_length++;
 
     if (state == RECORD || state == TEMP_RECORD || state == FIRST_TMP_RECORD) {
-        ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = add_no_overflow(ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE], ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE]);
+        ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = add(ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE], ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE]);
         ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = current;
     } else if (state == FIRST_RECORD) {
         ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = current;
@@ -357,7 +342,7 @@ int16_t sm(int16_t current) {
 
 int main()
 {
-    //set_sys_clock_khz(132000, true);
+    set_sys_clock_khz(132000, true);
     tusb_init();
     stdio_init_all();
 
