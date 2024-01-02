@@ -49,13 +49,13 @@ bool single_press = false;
 #define ACTIVE_SAMPLE 1
 
 enum state_type {
-    IDLE,
-    FIRST_RECORD,
+    STATE_IDLE,
+    STATE_FIRST_RECORD,
     RECORD_OVER,
     PLAYBACK,
 };
 
-state_type state = IDLE;
+state_type state = STATE_IDLE;
 volatile bool signal_write = false;
 
 static __attribute__((aligned(8))) pio_i2s i2s;
@@ -71,10 +71,10 @@ uint8_t process_sample(uint8_t sample)
     uint8_t current = sample;
 
     if (single_press) {
-        if (state != FIRST_RECORD) single_press = false; // TODO: quick hack
+        if (state != STATE_FIRST_RECORD) single_press = false; // TODO: quick hack
 
-        if (state == IDLE) {
-            state = FIRST_RECORD;
+        if (state == STATE_IDLE) {
+            state = STATE_FIRST_RECORD;
         } else if (state == RECORD_OVER) {
             state = PLAYBACK;
             printf("Done recording\n");
@@ -86,19 +86,19 @@ uint8_t process_sample(uint8_t sample)
 
     // add the current and looped values together, then write back
     uint index = 0;
-    if (state != IDLE) {
+    if (state != STATE_IDLE) {
         index = ram_buffer_offset[LOOP_BUFFER]++;
     }
 
     uint8_t mixed;
-    if (state == FIRST_RECORD || state == IDLE) {
+    if (state == STATE_FIRST_RECORD || state == STATE_IDLE) {
         mixed = current;
     } else {
         mixed = ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE] + ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] + current;
     }
     //pwm_set_chan_level(slice_num, channel, mixed);
 
-    if (state == IDLE) { 
+    if (state == STATE_IDLE) { 
         return mixed; // we're done
     }
     
@@ -107,13 +107,13 @@ uint8_t process_sample(uint8_t sample)
     if (state == RECORD_OVER) {
         ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE] += ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE];
         ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = current;
-    } else if (state == FIRST_RECORD) {
+    } else if (state == STATE_FIRST_RECORD) {
         ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = current;
         ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = 0;
     }
     
 
-    if (state == FIRST_RECORD) {
+    if (state == STATE_FIRST_RECORD) {
         loop_length++;
         if (single_press) {
             single_press = false;
@@ -133,7 +133,7 @@ uint8_t process_sample(uint8_t sample)
         which = !which; // swap buffers. The other buffer must contain the next audio to be played
 
         // special hack for first reads
-        if (state == FIRST_RECORD) ram_buffer_start[LOOP_BUFFER] = ram_buffer_start[PSRAM_ACCESS_BUFFER] + BUFFER_SIZE;
+        if (state == STATE_FIRST_RECORD) ram_buffer_start[LOOP_BUFFER] = ram_buffer_start[PSRAM_ACCESS_BUFFER] + BUFFER_SIZE;
 
         signal_write = true;
     }
@@ -175,7 +175,7 @@ static void dma_i2s_in_handler(void) {
 void write_routine() {
     uint num_write = ram_buffer_offset[PSRAM_ACCESS_BUFFER];
     uint sample_num = ram_buffer_start[PSRAM_ACCESS_BUFFER];
-    if (sample_num + num_write > loop_length) {
+    /*if (sample_num + num_write > loop_length) {
         uint write_size_one = loop_length - sample_num;
         uint write_size_two = num_write - write_size_one;
         uint32_t psram_size_one = write_size_one * 2;
@@ -186,7 +186,7 @@ void write_routine() {
         ice_sram_write_blocking(psram_address_one, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], psram_size_one);
         // printf("Also writing to address %d, writing %d samples\n", psram_address_two/2, write_size_two);
         ice_sram_write_blocking(psram_address_two, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER][write_size_one], psram_size_two);
-    } else {
+    } else*/ {
         uint32_t psram_address = sample_num * 2;
         // printf("Writing to address %d, var which is %d, writing %d samples\n", psram_address/2, which, num_write);
         ice_sram_write_blocking(psram_address, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], num_write * 2);// write_callback, NULL);
@@ -195,14 +195,14 @@ void write_routine() {
     ram_buffer_offset[PSRAM_ACCESS_BUFFER] = 0;
         
     // calculate the next block to load. 
-    if (state == FIRST_RECORD) {
+    if (state == STATE_FIRST_RECORD) {
         sample_num = 0; // we need to keep the first block ready for when the user hits the button
     } else {
         sample_num = (ram_buffer_start[LOOP_BUFFER] + BUFFER_SIZE) % loop_length;
     }
 
     ram_buffer_start[PSRAM_ACCESS_BUFFER] = sample_num;
-    if (sample_num + BUFFER_SIZE > loop_length) {
+    /*if (sample_num + BUFFER_SIZE > loop_length) {
         uint read_size_one = loop_length - sample_num;
         uint read_size_two = BUFFER_SIZE - read_size_one;
         uint32_t psram_size_one = read_size_one * 2;
@@ -213,13 +213,33 @@ void write_routine() {
         ice_sram_read_blocking(psram_address_one, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], psram_size_one);
         // printf("Also reading from address %d, reading %d samples\n", psram_address_two/2, read_size_two);
         ice_sram_read_blocking(psram_address_two, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER][read_size_one], psram_size_two);
-    } else {
+    } else*/ {
         uint32_t psram_address = sample_num * 2;
         // printf("Reading from address %d, var which is %d\n", psram_address/2, which);
         ice_sram_read_blocking(psram_address, (uint8_t*) ram_buffer[PSRAM_ACCESS_BUFFER], BUFFER_SIZE * 2);// read_callback, NULL);
     }
     signal_write = false;
 }
+
+enum state_t { 
+    IDLE, 
+    FIRST_RECORD, FIRST_TMP_RECORD, TEMP_RECORD, RECORD, 
+    FIRST_PLAYBACK, PLAY, PLAYBACK1,
+    FIRST_STOP, STOPPED 
+};
+
+const char* state_names[] = {
+    "IDLE", 
+    "FIRST_RECORD", "FIRST_TMP_RECORD", "TEMP_RECORD", "RECORD", 
+    "FIRST_PLAYBACK", "PLAY", "PLAYBACK1",
+    "FIRST_STOP", "STOPPED"
+};
+
+// state machine variables
+bool button_released = true;
+bool button_pressed = false;
+uint32_t last_time = 0;
+state_t state_var = IDLE;
 
 /**
  * @brief Called when the footswitch is pressed or released.
@@ -228,9 +248,83 @@ void footswitch_onchange(button_t *button_p) {
     button_t *button = (button_t*)button_p;
     //printf("Button on pin %d changed its state to %d\n", button->pin, button->state);
 
-    if(button->state) return; // Ignore button release.
+    if (button->state) {
+        button_released = true;
+    } else {
+        button_pressed = true;
+    }
+}
 
-    single_press = true;
+void reset_button() {
+    button_released = false;
+    button_pressed = false;
+    last_time = time_us_32();
+}
+
+inline bool second_passed() {
+    return time_us_32() - last_time > 1000000;
+}
+
+inline const char* get_state_type(state_t state) {
+    if (state == 0) return "Waiting";
+    if (state >= 1 && state <= 4) return "Recording";
+    if (state >= 5 && state <= 7) return "Playing";
+    if (state >= 8 && state <= 9) return "Stopped";
+    return "Unknown";
+}
+
+inline void update_state(state_t new_state) {
+    state_var = new_state;
+    reset_button();
+    printf("State changed to %s\n", state_names[state_var]);
+    printf("Current status: %s\n\n", get_state_type(state_var));
+}
+
+void sm() {
+    
+    state_t old_state = state_var;
+
+    if (state_var == IDLE) {
+        if (button_pressed && button_released) {
+            update_state(FIRST_RECORD);
+        }
+    }
+
+    if (state_var == FIRST_RECORD) {
+        if (button_pressed && button_released) {
+            update_state(FIRST_PLAYBACK);
+        }
+    }
+
+    if (state_var == FIRST_PLAYBACK) {
+        if (button_pressed && button_released) {
+            if (second_passed()) {
+                update_state(FIRST_TMP_RECORD);
+            } else {
+                update_state(FIRST_STOP);
+            }
+        }
+    }
+
+    if (state_var == FIRST_STOP) {
+        if (button_pressed && button_released) {
+            update_state(FIRST_PLAYBACK);
+        } else if (button_released) {
+
+        } else if (second_passed()) {
+            update_state(IDLE);
+        }
+    }
+
+    if (state_var == FIRST_TMP_RECORD) {
+        if (!button_pressed && !button_released && second_passed()) {
+            update_state(IDLE);
+        } else if (button_pressed && button_released && !second_passed()) {
+            update_state(STOPPED);
+        } else if (second_passed()) {
+            update_state(RECORD);
+        }
+    }
 }
 
 int main()
@@ -255,18 +349,19 @@ int main()
     my_config.clock_pin_base = 19;
     my_config.sck_enable = true;
 
-    i2s_program_start_synched(pio0, &my_config, dma_i2s_in_handler, &i2s);
+    //i2s_program_start_synched(pio0, &my_config, dma_i2s_in_handler, &i2s);
     
     // Initialize the PSRAM
-    ice_sram_init();
+    //ice_sram_init();
 
     // initialize the footswitch button
     button_t* footswitch = create_button(FOOTSWITCH_PIN, footswitch_onchange);
 
     while (1) {
         tud_task(); // tinyusb device task
-        if (signal_write) {
-            write_routine();
-        }
+        //if (signal_write) {
+        //    write_routine();
+        //}
+        sm();
     }
 }
