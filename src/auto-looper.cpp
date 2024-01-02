@@ -197,6 +197,17 @@ inline void update_state(state_t new_state) {
     printf("Current status: %s\n\n", get_state_type(state));
 }
 
+/**
+ * Add two signed ints, but if the result overflows or underflows, clip instead
+*/
+inline constexpr int16_t add_no_overflow(int16_t a, int16_t b) {
+    int16_t result = a + b;
+    if ((a > 0 && b > 0 && result < 0) || (a < 0 && b < 0 && result > 0)) {
+        return a > 0 ? INT16_MAX : INT16_MIN;
+    }
+    return result;
+}
+
 int16_t sm(int16_t current) {
 
     if (state == IDLE) {
@@ -304,7 +315,7 @@ int16_t sm(int16_t current) {
     if (state == FIRST_RECORD || state == IDLE || state == STOPPED || state == FIRST_STOP) {
         mixed = current;
     } else {
-        mixed = ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE] + ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] + current;
+        mixed = add_no_overflow(add_no_overflow(ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE], ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE]), current);
     }
 
     if (state == IDLE || state == STOPPED || state == FIRST_STOP) { 
@@ -315,7 +326,7 @@ int16_t sm(int16_t current) {
     if (state == FIRST_RECORD) loop_length++;
 
     if (state == RECORD || state == TEMP_RECORD || state == FIRST_TMP_RECORD) {
-        ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE] += ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE];
+        ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = add_no_overflow(ram_buffer[LOOP_BUFFER][index][MAIN_SAMPLE], ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE]);
         ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = current;
     } else if (state == FIRST_RECORD) {
         ram_buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = current;
