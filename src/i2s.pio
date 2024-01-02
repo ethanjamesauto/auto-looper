@@ -57,17 +57,16 @@
 
 .side_set 1
                     ;        /--- LRCLK
-                    ;        |/-- BCLK
-frameL:             ;        ||
+frameL:             ;        | only LRCLK is supplied for this setup
+    out pins, 1       side 0b0
+public entry_point:            ; we start on the left frame
     set x, 14         side 0b0 ; start of Left frame
-    pull noblock      side 0b0 ; One clock after edge change with no data
 dataL:
     out pins, 1       side 0b0
     jmp x-- dataL     side 0b0
-
 frameR:
+    out pins, 1       side 0b1
     set x, 14         side 0b1
-    pull noblock      side 0b1 ; One clock after edge change with no data
 dataR:
     out pins, 1       side 0b1
     jmp x-- dataR     side 0b1
@@ -189,7 +188,7 @@ static inline void i2s_out_master_program_init(PIO pio, uint8_t sm, uint8_t offs
     pio_sm_config sm_config = i2s_out_master_program_get_default_config(offset);
     sm_config_set_out_pins(&sm_config, dout_pin, 1);
     sm_config_set_sideset_pins(&sm_config, lrclk_pin);
-    sm_config_set_out_shift(&sm_config, false, false, bit_depth);
+    sm_config_set_out_shift(&sm_config, false, true, bit_depth);
     sm_config_set_fifo_join(&sm_config, PIO_FIFO_JOIN_TX);
     pio_sm_init(pio, sm, offset, &sm_config);
 
