@@ -238,7 +238,7 @@ const char* state_names[] = {
 // state machine variables
 bool button_released = true;
 bool button_pressed = false;
-uint32_t last_time = 0;
+uint64_t last_time = 0;
 state_t state_var = IDLE;
 
 /**
@@ -250,6 +250,7 @@ void footswitch_onchange(button_t *button_p) {
 
     if (button->state) {
         button_released = true;
+        button_pressed = false;
     } else {
         button_pressed = true;
     }
@@ -258,11 +259,11 @@ void footswitch_onchange(button_t *button_p) {
 void reset_button() {
     button_released = false;
     button_pressed = false;
-    last_time = time_us_32();
+    last_time = time_us_64();
 }
 
 inline bool second_passed() {
-    return time_us_32() - last_time > 1000000;
+    return time_us_64() - last_time > 750000;
 }
 
 inline const char* get_state_type(state_t state) {
@@ -323,6 +324,48 @@ void sm() {
             update_state(STOPPED);
         } else if (second_passed()) {
             update_state(RECORD);
+        }
+    }
+
+    if (state_var == RECORD) {
+        if (button_pressed /* && button_released*/) {
+            update_state(PLAY);
+        }
+    }
+
+    if (state_var == PLAY) {
+        if (button_pressed) {
+            if (second_passed()) {
+                update_state(TEMP_RECORD);
+            } else {
+                update_state(STOPPED);
+            }
+        }
+    }
+
+    if (state_var == TEMP_RECORD) {
+        if (!button_pressed && !button_released && second_passed()) {
+            update_state(PLAY);
+        } else if (button_pressed && button_released && !second_passed()) {
+            update_state(STOPPED);
+        } else if (button_released && second_passed()) {
+            update_state(RECORD);
+        }
+    }
+
+    if (state_var == STOPPED) {
+        if (button_pressed && button_released) {
+            update_state(PLAYBACK1);
+        } else if (!button_released && second_passed()) {
+            update_state(IDLE);
+        }
+    }
+
+    if (state_var == PLAYBACK1) {
+        if (button_released && second_passed()) {
+            update_state(PLAY);
+        } else if (!button_released && second_passed()) {
+            update_state(IDLE);
         }
     }
 }
