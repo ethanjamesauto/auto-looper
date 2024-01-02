@@ -61,7 +61,6 @@ state_t state = IDLE;
 uint read_location = 0;
 
 // TODO: stop using PSRAM for short loop lengths. Minimum loop length right now is BUFFER_SIZE
-// TODO: break up into inline functions
 
 static void process_audio(const int32_t* input, int32_t* output, size_t num_frames) {
     // Just copy the input to the output
@@ -365,7 +364,8 @@ int main()
     i2s_program_start_synched(pio0, &my_config, dma_i2s_in_handler, &i2s);
     
     // Initialize the PSRAM
-    ice_sram_init();
+    ice_sram_init(); // TODO: NOTE: you MUST modify ice_spi.c to stop it from setting i2s pins to SIO.
+    // comment out lines 120-122 inclusive in ice_spi.c
 
     // initialize the footswitch button
     button_t* footswitch = create_button(FOOTSWITCH_PIN, footswitch_onchange);
