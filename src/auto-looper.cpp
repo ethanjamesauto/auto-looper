@@ -28,7 +28,7 @@ uint channel;
 #define PWM_PERIOD (4096 >> SKIP)
 #define SAMPLE_RATE_US 23 // about 44.1 kHz
 
-#define BUFFER_SIZE (128) // Size in 2 SAMPLES (one active, one main). Max of 200k samples (now 100k because we use 2 buffers)
+#define BUFFER_SIZE (64) // Size in 2 SAMPLES (one active, one main). Max of 200k samples (now 100k because we use 2 buffers)
 
 uint8_t ram_buffer[2][BUFFER_SIZE][2];
 uint ram_buffer_start[2];
@@ -238,14 +238,6 @@ int main()
     //set_sys_clock_khz(132000, true);
     tusb_init();
     stdio_init_all();
-
-    //TODO: delete
-    for (int i = 0; i < BUFFER_SIZE; i++) {
-        ram_buffer[0][i][MAIN_SAMPLE] = 0;
-        ram_buffer[1][i][MAIN_SAMPLE] = 0;
-        ram_buffer[0][i][ACTIVE_SAMPLE] = 0;
-        ram_buffer[1][i][ACTIVE_SAMPLE] = 0;
-    }
 
     ram_buffer_start[0] = 0;
     ram_buffer_start[1] = 0;
