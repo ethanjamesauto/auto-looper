@@ -1,4 +1,4 @@
-#define BUFFER_SIZE 128 // Size in 2 SAMPLES (one active, one main). Max of 200k samples (now 100k because we use 2 buffers)
+#define BUFFER_SIZE 256 // Size in 2 SAMPLES (one active, one main). Max of 200k samples (now 100k because we use 2 buffers)
 #define SCRATCH_BUFFER_SIZE 48000 // Should be a second long
 
 // used for ram_buffer indexing

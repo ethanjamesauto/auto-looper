@@ -174,7 +174,6 @@ inline void update_state(state_t new_state) {
         looper.active_start = looper.loop_time;
         looper.active_size = 0;
 
-        printf("Old active region: %d, %d\n", looper.old_active_start, looper.old_active_size);
         printf("New active region: %d, %d\n", looper.active_start, looper.active_size);
     }
 
@@ -347,7 +346,10 @@ int16_t get_next_sample(int16_t current) {
             read_location = (looper.buffer_start[LOOP_BUFFER] + BUFFER_SIZE) % looper.loop_length;
         }
 
-        // TODO: see if signal_write is true here, and signal an error if it is.
+        // see if signal_write is true here, and signal an error if it is.
+        if (signal_write) {
+            printf("Error: previous write not complete\n");
+        }
         signal_write = true;
     }
 
