@@ -296,8 +296,8 @@ int16_t get_next_sample(int16_t current) {
         looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = add(looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE], looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE]);
         looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = current;
     } else if (state == FIRST_RECORD) {
-        looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = current;
-        looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = 0;
+        looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = 0;
+        looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = current;
     }
 
     if (looper.buffer_offset[LOOP_BUFFER] >= BUFFER_SIZE) {
