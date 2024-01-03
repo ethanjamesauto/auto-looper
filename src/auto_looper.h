@@ -86,6 +86,11 @@ struct looper_t {
         old_active_left = vector<uint>();
         undo_mode = false;
     }
+
+    inline void set_undo_mode(bool mode) {
+        undo_mode = mode;
+        printf("Undo mode set to %d\n", mode);
+    }
 };
 
 // run the main state machine and get the next sample

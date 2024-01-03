@@ -142,7 +142,7 @@ void reset_button() {
 }
 
 inline bool time_up() {
-    return time_us_64() - last_time > 750000;
+    return time_us_64() - last_time > 600000;
 }
 
 // for debugging
@@ -161,16 +161,17 @@ inline void update_state(state_t new_state) {
         looper = looper_t(); // reset the looper
     }
 
-    if (state == FIRST_TMP_RECORD || state == TEMP_RECORD) {
+    if (state == RECORD) {
         if (looper.undo_mode) {
             // we don't need to save the old active region, so we can just overwrite it
-            looper.undo_mode = false;
+            looper.set_undo_mode(false);
         } else {
             // mark the old active region for writing
             looper.add_old_active_region(looper.active_start, looper.active_size);
         }
 
         // create a new active region
+        // TODO: include scratch buffer in both of these
         looper.active_start = looper.loop_time;
         looper.active_size = 0;
 
@@ -256,12 +257,16 @@ int16_t get_next_sample(int16_t current) {
             } else {
                 update_state(STOPPED);
             }
+        } else if (!button_released && time_up()) {
+            // undo
+            looper.set_undo_mode(true);
         }
     }
 
     if (state == TEMP_RECORD) {
         if (!button_pressed && !button_released && time_up()) {
             // invalidate tmp buffer
+            looper.set_undo_mode(!looper.undo_mode);
             update_state(PLAY);
         } else if (button_pressed && button_released && !time_up()) {
             // invalidate tmp buffer
@@ -320,7 +325,7 @@ int16_t get_next_sample(int16_t current) {
         looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = add(active, main);
     }
 
-    if (state == RECORD || state == TEMP_RECORD || state == FIRST_TMP_RECORD) {
+    if (state == RECORD) {
         looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = current;
     } else if (state == FIRST_RECORD) {
         looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = current;
@@ -330,7 +335,7 @@ int16_t get_next_sample(int16_t current) {
     looper.loop_time++;
     if (state == FIRST_RECORD) looper.loop_length++;
 
-    if (state == FIRST_TMP_RECORD || state == TEMP_RECORD || state == RECORD) {
+    if (state == RECORD) {
         if (looper.active_size < looper.loop_length) looper.active_size++;
     }
 
