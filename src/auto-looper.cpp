@@ -167,9 +167,7 @@ inline void update_state(state_t new_state) {
             looper.undo_mode = false;
         } else {
             // mark the old active region for writing
-            looper.old_active_start = looper.active_start;
-            looper.old_active_size = looper.active_size;
-            looper.old_active_left = looper.active_size;
+            looper.add_old_active_region(looper.active_start, looper.active_size);
         }
 
         // create a new active region
@@ -303,32 +301,31 @@ int16_t get_next_sample(int16_t current) {
         return current; // we're done
     }
 
-    int16_t mixed = current;//add(add(looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE], looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE]), current);
+    int16_t mixed = current;
 
-    if ((!looper.undo_mode && looper.in_active_region()) || looper.in_old_active_region()) {
+    bool in_old_active_region = looper.in_old_active_region();
+    uint16_t main = looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE];
+    uint16_t active = looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE];
+
+    if ((!looper.undo_mode && looper.in_active_region()) || in_old_active_region) { // TODO: check this line more carefully
         // we're in the active region, so we need to mix the current sample with the active sample
-        mixed = add(mixed, looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE]);
+        mixed = add(mixed, active);
     }
     if (state != FIRST_RECORD) {
         // we're not in the first record state, so we need to mix the current sample with the main sample
-        mixed = add(mixed, looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE]);
+        mixed = add(mixed, main);
+    }
+
+    if (in_old_active_region) {
+        // we need to write the old active region
+        looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = add(active, main);
     }
 
     if (state == RECORD || state == TEMP_RECORD || state == FIRST_TMP_RECORD) {
-        uint16_t main = looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE];
-        uint16_t active = looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE];
-
-        if (looper.in_old_active_region() && looper.old_active_left > 0) {
-            // we need to write the old active region
-            looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = add(active, main);
-            looper.old_active_left--;
-        }
-
         looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = current;
     } else if (state == FIRST_RECORD) {
         looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = current;
     }
-
 
     // now increment time and length
     looper.loop_time++;
