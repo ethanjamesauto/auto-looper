@@ -22,8 +22,28 @@ struct looper_t {
     uint active_size;
     bool undo_mode; // when true, the active region is not played back
 
+    // TODO: must use a vector of old active regions if using a completely linear buffer system :(
     uint old_active_start;
     uint old_active_size;
+    uint old_active_left;
+
+    bool in_active_region() {
+        // must consider that the active region can wrap past the loop end
+        if (active_start + active_size > loop_length) {
+            return loop_time >= active_start || loop_time < (active_start + active_size) % loop_length;
+        } else {
+            return loop_time >= active_start && loop_time < active_start + active_size;
+        }
+    }
+
+    bool in_old_active_region() {
+        // must consider that the active region can wrap past the loop end
+        if (old_active_start + old_active_size > loop_length) {
+            return loop_time >= old_active_start || loop_time < (old_active_start + old_active_size) % loop_length;
+        } else {
+            return loop_time >= old_active_start && loop_time < old_active_start + old_active_size;
+        }
+    }
 
     looper_t() {
         buffer_start[0] = 0;

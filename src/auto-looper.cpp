@@ -35,6 +35,7 @@ enum state_t {
     FIRST_STOP, STOPPED 
 };
 
+// used for debugging
 const char* state_names[] = {
     "IDLE", 
     "FIRST_RECORD", "FIRST_TMP_RECORD", "TEMP_RECORD", "RECORD", 
@@ -144,6 +145,7 @@ inline bool time_up() {
     return time_us_64() - last_time > 750000;
 }
 
+// for debugging
 inline const char* get_state_type(state_t state) {
     if (state == 0) return "Waiting";
     if (state >= 1 && state <= 4) return "Recording";
@@ -157,6 +159,25 @@ inline void update_state(state_t new_state) {
 
     if (state == IDLE) {
         looper = looper_t(); // reset the looper
+    }
+
+    if (state == FIRST_TMP_RECORD || state == TEMP_RECORD) {
+        if (looper.undo_mode) {
+            // we don't need to save the old active region, so we can just overwrite it
+            looper.undo_mode = false;
+        } else {
+            // mark the old active region for writing
+            looper.old_active_start = looper.active_start;
+            looper.old_active_size = looper.active_size;
+            looper.old_active_left = looper.active_size;
+        }
+
+        // create a new active region
+        looper.active_start = looper.loop_time;
+        looper.active_size = 0;
+
+        printf("Old active region: %d, %d\n", looper.old_active_start, looper.old_active_size);
+        printf("New active region: %d, %d\n", looper.active_start, looper.active_size);
     }
 
     reset_button();
@@ -278,26 +299,43 @@ int16_t get_next_sample(int16_t current) {
         index = looper.buffer_offset[LOOP_BUFFER]++;
     }
 
-    int16_t mixed;
-    if (state == FIRST_RECORD || state == IDLE || state == STOPPED || state == FIRST_STOP) {
-        mixed = current;
-    } else {
-        mixed = add(add(looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE], looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE]), current);
+    if (state == IDLE || state == STOPPED || state == FIRST_STOP) { 
+        return current; // we're done
     }
 
-    if (state == IDLE || state == STOPPED || state == FIRST_STOP) { 
-        return mixed; // we're done
+    int16_t mixed = current;//add(add(looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE], looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE]), current);
+
+    if ((!looper.undo_mode && looper.in_active_region()) || looper.in_old_active_region()) {
+        // we're in the active region, so we need to mix the current sample with the active sample
+        mixed = add(mixed, looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE]);
     }
-    
+    if (state != FIRST_RECORD) {
+        // we're not in the first record state, so we need to mix the current sample with the main sample
+        mixed = add(mixed, looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE]);
+    }
+
+    if (state == RECORD || state == TEMP_RECORD || state == FIRST_TMP_RECORD) {
+        uint16_t main = looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE];
+        uint16_t active = looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE];
+
+        if (looper.in_old_active_region() && looper.old_active_left > 0) {
+            // we need to write the old active region
+            looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = add(active, main);
+            looper.old_active_left--;
+        }
+
+        looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = current;
+    } else if (state == FIRST_RECORD) {
+        looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = current;
+    }
+
+
+    // now increment time and length
     looper.loop_time++;
     if (state == FIRST_RECORD) looper.loop_length++;
 
-    if (state == RECORD || state == TEMP_RECORD || state == FIRST_TMP_RECORD) {
-        looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = add(looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE], looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE]);
-        looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = current;
-    } else if (state == FIRST_RECORD) {
-        looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = 0;
-        looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = current;
+    if (state == FIRST_TMP_RECORD || state == TEMP_RECORD || state == RECORD) {
+        if (looper.active_size < looper.loop_length) looper.active_size++;
     }
 
     if (looper.buffer_offset[LOOP_BUFFER] >= BUFFER_SIZE) {
