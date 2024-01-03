@@ -142,7 +142,7 @@ void reset_button() {
 }
 
 inline bool time_up() {
-    return time_us_64() - last_time > 600000;
+    return time_us_64() - last_time > 660000;
 }
 
 // for debugging
@@ -176,6 +176,12 @@ inline void update_state(state_t new_state) {
         looper.active_size = 0;
 
         printf("New active region: %d, %d\n", looper.active_start, looper.active_size);
+    }
+
+    if (state == FIRST_TMP_RECORD || state == TEMP_RECORD) {
+        // reset the scratch buffer
+        looper.scratch_buffer_start = looper.loop_time;
+        looper.scratch_buffer_size = 0;
     }
 
     reset_button();
@@ -233,13 +239,14 @@ int16_t get_next_sample(int16_t current) {
     }
 
     if (state == FIRST_TMP_RECORD) {
-        if (!button_pressed && !button_released && time_up()) {
+        bool done = looper.scratch_buffer_size >= SCRATCH_BUFFER_SIZE;
+        if (!button_pressed && !button_released && done) {
             // invalidate tmp buffer
             update_state(IDLE);
-        } else if (button_pressed && button_released && !time_up()) {
+        } else if (button_pressed && button_released && !done) {
             // invalidate tmp buffer
             update_state(STOPPED);
-        } else if (time_up()) {
+        } else if (done) {
             update_state(RECORD);
         }
     }
@@ -260,18 +267,20 @@ int16_t get_next_sample(int16_t current) {
         } else if (!button_released && time_up()) {
             // undo
             looper.set_undo_mode(true);
+            reset_button();
         }
     }
 
     if (state == TEMP_RECORD) {
-        if (!button_pressed && !button_released && time_up()) {
+        bool done = looper.scratch_buffer_size >= SCRATCH_BUFFER_SIZE;
+        if (!button_pressed && !button_released && done) {
             // invalidate tmp buffer
             looper.set_undo_mode(!looper.undo_mode);
             update_state(PLAY);
-        } else if (button_pressed && button_released && !time_up()) {
+        } else if (button_pressed && button_released && !done) {
             // invalidate tmp buffer
             update_state(STOPPED);
-        } else if (button_released && time_up()) {
+        } else if (done) {
             update_state(RECORD);
         }
     }
@@ -329,6 +338,11 @@ int16_t get_next_sample(int16_t current) {
         looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = current;
     } else if (state == FIRST_RECORD) {
         looper.buffer[LOOP_BUFFER][index][MAIN_SAMPLE] = current;
+    }
+
+    if (state == TEMP_RECORD || state == FIRST_TMP_RECORD) {
+        looper.scratch_buffer[looper.scratch_buffer_size] = current;
+        looper.scratch_buffer_size++;
     }
 
     // now increment time and length
