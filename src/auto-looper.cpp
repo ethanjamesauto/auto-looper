@@ -98,6 +98,36 @@ void write_routine() {
         ice_sram_write_blocking(psram_address, (uint8_t*) looper.buffer[PSRAM_ACCESS_BUFFER], psram_write_size);// write_callback, NULL);
     }
 
+    // TODO: read scratch buffer if needed, using old active buffer as well!
+    if (looper.scratch_buffer_size == SCRATCH_BUFFER_SIZE) {
+        // read from psram, mix with scratch buffer, write back to psram.
+        // also mix active buffer into main buffer if old active buffer is not empty
+        uint start_time = looper.scratch_buffer_start + looper.scratch_buffer_ptr;
+        uint32_t psram_address = start_time * 4;
+        uint32_t psram_rw_size = BUFFER_SIZE * 4;
+        //printf("Reading from address %d, var which is %d\n", psram_address/2, which);
+        ice_sram_read_blocking(psram_address, (uint8_t*) looper.buffer[PSRAM_ACCESS_BUFFER], psram_rw_size);// read_callback, NULL);
+
+        for (int i = 0; i < BUFFER_SIZE; i++) {
+            if (looper.in_old_active_region(start_time + i)) { // TODO: check old active region logic
+                // mix active buffer into main buffer
+                looper.buffer[PSRAM_ACCESS_BUFFER][i][MAIN_SAMPLE] = add(looper.buffer[PSRAM_ACCESS_BUFFER][i][MAIN_SAMPLE], looper.buffer[PSRAM_ACCESS_BUFFER][i][ACTIVE_SAMPLE]);
+            }
+            // mix scratch buffer into active buffer
+            looper.buffer[PSRAM_ACCESS_BUFFER][i][ACTIVE_SAMPLE] = looper.scratch_buffer[looper.scratch_buffer_ptr + i];
+        }
+
+        // write back to psram
+        ice_sram_write_blocking(psram_address, (uint8_t*) looper.buffer[PSRAM_ACCESS_BUFFER], psram_rw_size);// write_callback, NULL);
+
+        looper.scratch_buffer_ptr += BUFFER_SIZE;
+        if (looper.scratch_buffer_ptr >= looper.scratch_buffer_size) {
+            looper.scratch_buffer_size = 0;
+            looper.scratch_buffer_ptr = 0;
+            printf("Finished writing scratch buffer\n");
+        }
+    }
+
     looper.buffer_offset[PSRAM_ACCESS_BUFFER] = 0;
     looper.buffer_start[PSRAM_ACCESS_BUFFER] = read_location;
     /*if (sample_num + BUFFER_SIZE > loop_length) {
@@ -170,10 +200,11 @@ inline void update_state(state_t new_state) {
             looper.add_old_active_region(looper.active_start, looper.active_size);
         }
 
-        // create a new active region
-        // TODO: include scratch buffer in both of these
-        looper.active_start = looper.loop_time;
-        looper.active_size = 0;
+        if (looper.scratch_buffer_size != SCRATCH_BUFFER_SIZE) {
+            printf("Error: scratch buffer not full\n");
+        }
+        looper.active_start = (looper.loop_time - looper.scratch_buffer_size + looper.loop_length) % looper.loop_length;
+        looper.active_size = looper.scratch_buffer_size;
 
         printf("New active region: %d, %d\n", looper.active_start, looper.active_size);
     }
@@ -182,22 +213,12 @@ inline void update_state(state_t new_state) {
         // reset the scratch buffer
         looper.scratch_buffer_start = looper.loop_time;
         looper.scratch_buffer_size = 0;
+        looper.scratch_buffer_ptr = 0;
     }
 
     reset_button();
     printf("State changed to %s\n", state_names[state]);
     printf("Current status: %s\n\n", get_state_type(state));
-}
-
-/**
- * Add two signed ints, but if the result overflows or underflows, clip instead
-*/
-inline constexpr int16_t add(int16_t a, int16_t b) {
-    int16_t result = a + b;
-    if ((a > 0 && b > 0 && result < 0) || (a < 0 && b < 0 && result > 0)) {
-        return a > 0 ? INT16_MAX : INT16_MIN;
-    }
-    return result;
 }
 
 int16_t get_next_sample(int16_t current) {
@@ -252,7 +273,8 @@ int16_t get_next_sample(int16_t current) {
     }
 
     if (state == RECORD) {
-        if (button_pressed /* && button_released*/) {
+        // scratch buffer must be flushed before finishing recording
+        if (button_pressed && looper.scratch_buffer_size == 0/* && button_released*/) {
             update_state(PLAY);
         }
     }
@@ -327,6 +349,11 @@ int16_t get_next_sample(int16_t current) {
     if (state != FIRST_RECORD) {
         // we're not in the first record state, so we need to mix the current sample with the main sample
         mixed = add(mixed, main);
+    }
+
+    // TODO: hasn't been verified yet
+    if (looper.active_size == looper.loop_length) {
+        looper.buffer[LOOP_BUFFER][index][ACTIVE_SAMPLE] = add(active, current);
     }
 
     if (in_old_active_region) {

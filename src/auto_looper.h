@@ -1,5 +1,5 @@
 #define BUFFER_SIZE 256 // Size in 2 SAMPLES (one active, one main). Max of 200k samples (now 100k because we use 2 buffers)
-#define SCRATCH_BUFFER_SIZE (48000 * 2 / 3) // Should be a second long
+#define SCRATCH_BUFFER_SIZE (125*256) // Should be a 2/3 second long
 
 // used for ram_buffer indexing
 #define MAIN_SAMPLE 0
@@ -13,6 +13,7 @@ struct looper_t {
     int16_t scratch_buffer[SCRATCH_BUFFER_SIZE];
     uint scratch_buffer_start;
     uint scratch_buffer_size;
+    uint scratch_buffer_ptr;
 
     int16_t buffer[2][BUFFER_SIZE][2];
 
@@ -31,23 +32,23 @@ struct looper_t {
     vector<uint> old_active_size;
     vector<uint> old_active_left;
 
-    bool in_region(uint start, uint size) {
+    bool in_region(uint start, uint size, uint timestamp) {
         // must consider that the region can wrap past the loop end
         if (start + size > loop_length) {
-            return loop_time >= start || loop_time < (start + size) % loop_length;
+            return timestamp >= start || timestamp < (start + size) % loop_length;
         } else {
-            return loop_time >= start && loop_time < start + size;
+            return timestamp >= start && timestamp < start + size;
         }
     }
 
     bool in_active_region() {
-        return in_region(active_start, active_size);
+        return in_region(active_start, active_size, loop_time);
     }
 
-    bool in_old_active_region() {
+    bool in_old_active_region(uint timestamp) {
         bool ret = false;
         for (int i = 0; i < old_active_start.size(); i++) {
-            if (in_region(old_active_start[i], old_active_size[i])) {
+            if (in_region(old_active_start[i], old_active_size[i], timestamp)) {
                 ret = true;
                 old_active_left[i]--;
                 if (old_active_left[i] == 0) {
@@ -60,6 +61,10 @@ struct looper_t {
             }
         }
         return ret;
+    }
+
+    bool in_old_active_region() {
+        return in_old_active_region(loop_time);
     }
 
     void add_old_active_region(uint start, uint size) {
@@ -92,6 +97,17 @@ struct looper_t {
         printf("Undo mode set to %d\n", mode);
     }
 };
+
+/**
+ * Add two signed ints, but if the result overflows or underflows, clip instead
+*/
+inline constexpr int16_t add(int16_t a, int16_t b) {
+    int16_t result = a + b;
+    if ((a > 0 && b > 0 && result < 0) || (a < 0 && b < 0 && result > 0)) {
+        return a > 0 ? INT16_MAX : INT16_MIN;
+    }
+    return result;
+}
 
 // run the main state machine and get the next sample
 int16_t get_next_sample(int16_t current);
