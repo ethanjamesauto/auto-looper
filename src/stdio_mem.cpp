@@ -46,6 +46,12 @@ void write_blocking(char* data, long long address, long long size)
     fwrite((char*)&WRITE, 1, 1, stdout);
     fflush(stdout);
 
+    for (int i = 0; i < size; i++) {
+        if (data[i] == 10) { //known problem character
+            data[i] = 9;
+        }
+    }
+
     // write the data using fwrite, which is likely faster (TODO: verify)
     fwrite(data, 1, size, stdout);
     fflush(stdout);

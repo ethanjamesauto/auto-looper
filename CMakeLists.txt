@@ -56,6 +56,7 @@ target_link_libraries(auto-looper
         hardware_clocks
         hardware_pwm
         hardware_adc
+        pico_multicore
         )
 
 pico_add_extra_outputs(auto-looper)
